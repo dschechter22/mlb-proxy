@@ -1,0 +1,1747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pitch IQ</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #f5f2ec; font-family: 'Nunito', sans-serif; }
+  #root { min-height: 100vh; }
+  input, select, button, textarea { font-family: inherit; }
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useMemo, useEffect } = React;
+
+const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap');`;
+
+// ─── PASTE YOUR CLOUDFLARE WORKER URL HERE ────────────────────────────────────
+const PROXY_BASE = "https://mlb-proxy-lovat.vercel.app";
+
+async function mlbFetch(path) {
+  try {
+    // Split path into pathname and query string to encode separately
+    const [pathname, qs] = path.split("?");
+    const proxyUrl = qs
+      ? `${PROXY_BASE}/api/proxy?path=${encodeURIComponent(pathname + "?" + qs)}`
+      : `${PROXY_BASE}/api/proxy?path=${encodeURIComponent(pathname)}`;
+    console.log("mlbFetch URL:", proxyUrl);
+    const res = await fetch(proxyUrl);
+    console.log("mlbFetch status:", res.status);
+    if (res.ok) {
+      const data = await res.json();
+      if (!data.error) return data;
+      console.error("mlbFetch API error:", data.error);
+    }
+  } catch(e) {
+    console.error("mlbFetch exception:", e.message);
+  }
+  return null;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+const C = {
+  bg:"#f5f2ec", surface:"#edeae2", border:"#d8d4ca",
+  green:"#2d6a4f", greenMid:"#40916c", greenLight:"#d8f3dc", greenDim:"rgba(45,106,79,0.08)",
+  text:"#1a2e22", textMid:"#4a6355", textSoft:"#8a9e93",
+  warn:"#b5451b", warnLight:"#fce8e0", gold:"#b5811b", goldLight:"#fdf3dc",
+  blue:"#1a6fb5", blueLight:"#dbeeff", white:"#ffffff",
+};
+
+// ─── MLB The Show API helpers ─────────────────────────────────────────────────
+// Normalise pitch name from API to our internal names
+const PITCH_NAME_MAP = {
+  "Four-Seam Fastball": "4-Seam FB",
+  "Four Seam Fastball": "4-Seam FB",
+  "4-Seam Fastball": "4-Seam FB",
+  "Two-Seam Fastball": "2-Seam FB",
+  "Two Seam Fastball": "2-Seam FB",
+  "2-Seam Fastball": "2-Seam FB",
+  "Cutter": "Cutter",
+  "Cut Fastball": "Cutter",
+  "Sinker": "Sinker",
+  "Slider": "Slider",
+  "Sweeper": "Sweeper",
+  "Curveball": "Curveball",
+  "12-6 Curveball": "12-6 Curve",
+  "12-6 Curve": "12-6 Curve",
+  "Knuckle-Curve": "Curveball",
+  "Knuckle Curve": "Curveball",
+  "Sweeping Curve": "Sweeper",
+  "Slurve": "Curveball",
+  "Changeup": "Changeup",
+  "Change Up": "Changeup",
+  "Circle Change": "Changeup",
+  "Circle Changeup": "Changeup",
+  "Splitter": "Splitter",
+  "Split-Finger": "Splitter",
+  "Knuckleball": "Knuckleball",
+  "Running Fastball": "2-Seam FB",
+};
+
+function normalizePitchName(name) {
+  return PITCH_NAME_MAP[name] || name;
+}
+
+function getPitchList(card) {
+  // MLB26 API nests pitches under card.pitches.pitches
+  if (card.pitches && card.pitches.pitches) return card.pitches.pitches;
+  if (Array.isArray(card.pitches)) return card.pitches;
+  return [];
+}
+
+function cardIsHitter(c) {
+  return c.is_hitter === true || c.is_hitter === 1;
+}
+
+function apiCardToPitcher(card) {
+  const pitchList = getPitchList(card);
+  const pitches = pitchList
+    .map(p => ({ type: normalizePitchName(p.name), velo: p.speed || 85 }))
+    .filter(p => PITCH_PROFILES[p.type]);
+  const pos = card.display_position || "";
+  const role = (pos==="RP"||pos==="CL"||pos==="MR") ? "RP" : "SP";
+  return {
+    name: card.name,
+    team: card.team || "",
+    hand: card.throw_hand || "R",
+    role,
+    ovr: card.ovr || card.new_rank || 0,
+    rarity: card.rarity || "",
+    series: card.series || "",
+    img: card.baked_img || card.img || "",
+    pitches,
+    speed: card.speed || 50,
+    fromApi: true,
+  };
+}
+
+async function fetchItemByUuid(uuid) {
+  return await mlbFetch(`/apis/item.json?uuid=${uuid}`);
+}
+
+async function searchPitchers(query) {
+  if (!query || query.length < 2) return [];
+  const data = await mlbFetch(`/apis/listings.json?type=mlb_card&name=${encodeURIComponent(query)}`);
+  if (!data) throw new Error("No response from proxy");
+  const listings = (data.listings || []).slice(0, 15);
+  console.log("Listings found:", listings.length, listings.map(l=>(l.item||l).name));
+  // Fetch full items in parallel -- don't pre-filter, let pitch data decide
+  const fullItems = await Promise.all(
+    listings.map(async l => {
+      const stub = l.item || l;
+      const full = await fetchItemByUuid(stub.uuid);
+      console.log("Full item:", stub.name, "is_hitter:", full?.is_hitter, "pitches:", getPitchList(full||{}).length);
+      return full;
+    })
+  );
+  return fullItems
+    .filter(c => c && !cardIsHitter(c) && getPitchList(c).length >= 2)
+    .map(apiCardToPitcher);
+}
+
+async function searchBatters(query) {
+  if (!query || query.length < 2) return [];
+  const data = await mlbFetch(`/apis/listings.json?type=mlb_card&name=${encodeURIComponent(query)}`);
+  if (!data) return [];
+  return (data.listings || [])
+    .map(l => l.item || l)
+    .filter(c => c.is_hitter === 1)
+    .map(c => ({
+      name: c.name,
+      team: c.team || "",
+      bat: c.bat_hand || "R",
+      ovr: c.ovr || 0,
+      rarity: c.rarity || "",
+      series: c.series || "",
+      speed: c.speed || 50,
+      fromApi: true,
+    }));
+}
+
+
+// ─── MLB Batter Database (2026 rosters, handedness) ───────────────────────────
+const MLB_BATTERS = [
+  // AL East
+  {name:"Aaron Judge",team:"NYY",bat:"R"},{name:"Juan Soto",team:"NYY",bat:"L"},{name:"Gleyber Torres",team:"NYY",bat:"R"},
+  {name:"Anthony Volpe",team:"NYY",bat:"R"},{name:"Jazz Chisholm",team:"NYY",bat:"L"},{name:"Giancarlo Stanton",team:"NYY",bat:"R"},
+  {name:"Cody Bellinger",team:"NYY",bat:"L"},{name:"Paul Goldschmidt",team:"NYY",bat:"R"},
+  {name:"Rafael Devers",team:"BOS",bat:"L"},{name:"Triston Casas",team:"BOS",bat:"L"},{name:"Jarren Duran",team:"BOS",bat:"L"},
+  {name:"Trevor Story",team:"BOS",bat:"R"},{name:"Rob Refsnyder",team:"BOS",bat:"R"},{name:"Connor Wong",team:"BOS",bat:"R"},
+  {name:"Vladimir Guerrero Jr.",team:"TOR",bat:"R"},{name:"Bo Bichette",team:"TOR",bat:"R"},{name:"George Springer",team:"TOR",bat:"R"},
+  {name:"Daulton Varsho",team:"TOR",bat:"L"},{name:"Ernie Clement",team:"TOR",bat:"R"},{name:"Kazuma Okamoto",team:"TOR",bat:"R"},
+  {name:"Gunnar Henderson",team:"BAL",bat:"L"},{name:"Adley Rutschman",team:"BAL",bat:"S"},{name:"Anthony Santander",team:"BAL",bat:"S"},
+  {name:"Ryan Mountcastle",team:"BAL",bat:"R"},{name:"Cedric Mullins",team:"BAL",bat:"L"},{name:"Jorge Mateo",team:"BAL",bat:"R"},
+  {name:"Jose Ramirez",team:"CLE",bat:"S"},{name:"Steven Kwan",team:"CLE",bat:"L"},{name:"Josh Naylor",team:"CLE",bat:"L"},
+  {name:"Bo Naylor",team:"CLE",bat:"L"},{name:"Lane Thomas",team:"CLE",bat:"R"},{name:"David Fry",team:"CLE",bat:"S"},
+  // AL Central
+  {name:"Bobby Witt Jr.",team:"KC",bat:"R"},{name:"Salvador Perez",team:"KC",bat:"R"},{name:"Michael Massey",team:"KC",bat:"L"},
+  {name:"MJ Melendez",team:"KC",bat:"L"},{name:"Vinnie Pasquantino",team:"KC",bat:"L"},
+  {name:"Corey Seager",team:"TEX",bat:"L"},{name:"Marcus Semien",team:"TEX",bat:"R"},{name:"Wyatt Langford",team:"TEX",bat:"R"},
+  {name:"Jonah Heim",team:"TEX",bat:"S"},{name:"Adolis Garcia",team:"TEX",bat:"R"},
+  {name:"Riley Greene",team:"DET",bat:"L"},{name:"Spencer Torkelson",team:"DET",bat:"R"},{name:"Kerry Carpenter",team:"DET",bat:"L"},
+  {name:"Matt Vierling",team:"DET",bat:"R"},{name:"Parker Meadows",team:"DET",bat:"L"},
+  {name:"Luis Robert Jr.",team:"CWS",bat:"R"},{name:"Andrew Vaughn",team:"CWS",bat:"R"},{name:"Gavin Sheets",team:"CWS",bat:"L"},
+  {name:"Munetaka Murakami",team:"CWS",bat:"R"},
+  {name:"Byron Buxton",team:"MIN",bat:"R"},{name:"Carlos Correa",team:"MIN",bat:"R"},{name:"Ryan Jeffers",team:"MIN",bat:"R"},
+  {name:"Royce Lewis",team:"MIN",bat:"R"},{name:"Max Kepler",team:"MIN",bat:"L"},
+  // AL West
+  {name:"Yordan Alvarez",team:"HOU",bat:"L"},{name:"Alex Bregman",team:"HOU",bat:"R"},{name:"Jose Altuve",team:"HOU",bat:"R"},
+  {name:"Kyle Tucker",team:"HOU",bat:"L"},{name:"Jeremy Pena",team:"HOU",bat:"R"},
+  {name:"Julio Rodriguez",team:"SEA",bat:"R"},{name:"Cal Raleigh",team:"SEA",bat:"S"},{name:"Mitch Garver",team:"SEA",bat:"R"},
+  {name:"Ty France",team:"SEA",bat:"R"},{name:"Josh Bell",team:"SEA",bat:"S"},
+  {name:"Shohei Ohtani",team:"LAA",bat:"L"},{name:"Mike Trout",team:"LAA",bat:"R"},{name:"Anthony Rendon",team:"LAA",bat:"R"},
+  {name:"Logan O'Hoppe",team:"LAA",bat:"R"},{name:"Taylor Ward",team:"LAA",bat:"R"},
+  {name:"Brent Rooker",team:"OAK",bat:"R"},{name:"Lawrence Butler",team:"OAK",bat:"L"},{name:"Nick Allen",team:"OAK",bat:"R"},
+  {name:"Zack Gelof",team:"OAK",bat:"R"},
+  {name:"Nathaniel Lowe",team:"TEX",bat:"L"},{name:"Josh Jung",team:"TEX",bat:"R"},
+  // NL East
+  {name:"Bryce Harper",team:"PHI",bat:"L"},{name:"Trea Turner",team:"PHI",bat:"R"},{name:"Kyle Schwarber",team:"PHI",bat:"L"},
+  {name:"Nick Castellanos",team:"PHI",bat:"R"},{name:"J.T. Realmuto",team:"PHI",bat:"R"},{name:"Alec Bohm",team:"PHI",bat:"R"},
+  {name:"Francisco Lindor",team:"NYM",bat:"S"},{name:"Pete Alonso",team:"NYM",bat:"R"},{name:"Jeff McNeil",team:"NYM",bat:"L"},
+  {name:"Brandon Nimmo",team:"NYM",bat:"L"},{name:"Mark Vientos",team:"NYM",bat:"R"},{name:"Harrison Bader",team:"NYM",bat:"R"},
+  {name:"Ronald Acuna Jr.",team:"ATL",bat:"R"},{name:"Austin Riley",team:"ATL",bat:"R"},{name:"Ozzie Albies",team:"ATL",bat:"S"},
+  {name:"Matt Olson",team:"ATL",bat:"L"},{name:"Michael Harris II",team:"ATL",bat:"L"},{name:"Sean Murphy",team:"ATL",bat:"R"},
+  {name:"Juan Soto",team:"NYY",bat:"L"},{name:"Rhys Hoskins",team:"MIL",bat:"R"},
+  {name:"Jazz Chisholm Jr.",team:"NYY",bat:"L"},{name:"Starling Marte",team:"NYM",bat:"R"},
+  {name:"CJ Abrams",team:"WSH",bat:"L"},{name:"Joey Meneses",team:"WSH",bat:"R"},{name:"Keibert Ruiz",team:"WSH",bat:"S"},
+  {name:"Jesse Winker",team:"WSH",bat:"L"},
+  {name:"Jesper Nootbaar",team:"STL",bat:"L"},{name:"Paul DeJong",team:"STL",bat:"R"},
+  // NL Central
+  {name:"Elly De La Cruz",team:"CIN",bat:"S"},{name:"Tyler Stephenson",team:"CIN",bat:"R"},{name:"Jonathan India",team:"CIN",bat:"R"},
+  {name:"Spencer Steer",team:"CIN",bat:"R"},{name:"TJ Friedl",team:"CIN",bat:"L"},
+  {name:"Ian Happ",team:"CHC",bat:"S"},{name:"Dansby Swanson",team:"CHC",bat:"R"},{name:"Seiya Suzuki",team:"CHC",bat:"R"},
+  {name:"Cody Bellinger",team:"CHC",bat:"L"},{name:"Nico Hoerner",team:"CHC",bat:"R"},
+  {name:"William Contreras",team:"MIL",bat:"R"},{name:"Christian Yelich",team:"MIL",bat:"L"},{name:"Sal Frelick",team:"MIL",bat:"L"},
+  {name:"Jackson Chourio",team:"MIL",bat:"R"},{name:"Willy Adames",team:"MIL",bat:"R"},
+  {name:"Paul Goldschmidt",team:"STL",bat:"R"},{name:"Nolan Arenado",team:"STL",bat:"R"},{name:"Lars Nootbaar",team:"STL",bat:"L"},
+  {name:"Brendan Donovan",team:"STL",bat:"L"},
+  {name:"Ke'Bryan Hayes",team:"PIT",bat:"R"},{name:"Oneil Cruz",team:"PIT",bat:"L"},{name:"Connor Joe",team:"PIT",bat:"R"},
+  {name:"Andrew McCutchen",team:"PIT",bat:"R"},
+  // NL West
+  {name:"Mookie Betts",team:"LAD",bat:"R"},{name:"Freddie Freeman",team:"LAD",bat:"L"},{name:"Will Smith",team:"LAD",bat:"R"},
+  {name:"Teoscar Hernandez",team:"LAD",bat:"R"},{name:"Max Muncy",team:"LAD",bat:"L"},{name:"Andy Pages",team:"LAD",bat:"R"},
+  {name:"Fernando Tatis Jr.",team:"SD",bat:"R"},{name:"Xander Bogaerts",team:"SD",bat:"R"},{name:"Jake Cronenworth",team:"SD",bat:"L"},
+  {name:"Luis Arraez",team:"SD",bat:"L"},{name:"Jackson Merrill",team:"SD",bat:"L"},
+  {name:"Ketel Marte",team:"ARI",bat:"S"},{name:"Corbin Carroll",team:"ARI",bat:"L"},{name:"Gabriel Moreno",team:"ARI",bat:"R"},
+  {name:"Christian Walker",team:"ARI",bat:"R"},{name:"Lourdes Gurriel Jr.",team:"ARI",bat:"R"},
+  {name:"Matt Chapman",team:"SF",bat:"R"},{name:"Heliot Ramos",team:"SF",bat:"R"},{name:"Tyler Fitzgerald",team:"SF",bat:"R"},
+  {name:"Patrick Bailey",team:"SF",bat:"S"},{name:"Michael Conforto",team:"SF",bat:"L"},
+  {name:"Ryan McMahon",team:"COL",bat:"L"},{name:"Ezequiel Tovar",team:"COL",bat:"R"},{name:"Charlie Blackmon",team:"COL",bat:"L"},
+  {name:"Brenton Doyle",team:"COL",bat:"R"},
+  {name:"Christian Yelich",team:"MIL",bat:"L"},{name:"Jake Burger",team:"MIA",bat:"R"},{name:"Luis Arraez",team:"MIA",bat:"L"},
+  {name:"Jazz Chisholm",team:"MIA",bat:"L"},{name:"Jorge Soler",team:"ATL",bat:"R"},
+];
+
+// ─── Pitcher Database (2026 rosters) ─────────────────────────────────────────
+const PITCHERS = [
+  // SP - AL East
+  {name:"Gerrit Cole",team:"NYY",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:88},{type:"Sweeper",velo:84},{type:"Changeup",velo:88},{type:"Curveball",velo:80}]},
+  {name:"Max Fried",team:"NYY",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Curveball",velo:78},{type:"Changeup",velo:84},{type:"Sinker",velo:92},{type:"Slider",velo:83}]},
+  {name:"Garrett Crochet",team:"BOS",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Changeup",velo:86}]},
+  {name:"Kevin Gausman",team:"TOR",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Splitter",velo:84},{type:"Slider",velo:83},{type:"Cutter",velo:88}]},
+  {name:"Chris Sale",team:"ATL",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:80},{type:"Changeup",velo:82},{type:"Cutter",velo:87}]},
+  {name:"Corbin Burnes",team:"BAL",hand:"R",role:"SP",pitches:[{type:"Cutter",velo:93},{type:"Sinker",velo:93},{type:"Curveball",velo:80},{type:"Changeup",velo:86},{type:"4-Seam FB",velo:94}]},
+  // SP - AL Central
+  {name:"Tarik Skubal",team:"DET",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Changeup",velo:85},{type:"Slider",velo:84},{type:"Curveball",velo:76}]},
+  {name:"Hunter Brown",team:"HOU",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Curveball",velo:79},{type:"Changeup",velo:87}]},
+  {name:"Cole Ragans",team:"KC",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:84},{type:"Curveball",velo:77},{type:"Changeup",velo:85}]},
+  {name:"Joe Ryan",team:"MIN",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Slider",velo:84},{type:"Changeup",velo:83},{type:"Curveball",velo:76}]},
+  // SP - AL West
+  {name:"Luis Castillo",team:"SEA",hand:"R",role:"SP",pitches:[{type:"Sinker",velo:96},{type:"Slider",velo:87},{type:"Changeup",velo:87},{type:"4-Seam FB",velo:96}]},
+  {name:"George Kirby",team:"SEA",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Slider",velo:85},{type:"Sinker",velo:93},{type:"Changeup",velo:86},{type:"Cutter",velo:89}]},
+  {name:"Jose Soriano",team:"LAA",hand:"R",role:"SP",pitches:[{type:"Sinker",velo:99},{type:"Slider",velo:89},{type:"4-Seam FB",velo:99},{type:"Changeup",velo:88}]},
+  {name:"Luis Severino",team:"OAK",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:86},{type:"Changeup",velo:85},{type:"Curveball",velo:78}]},
+  // SP - NL East
+  {name:"Zack Wheeler",team:"PHI",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Sinker",velo:95},{type:"Slider",velo:87},{type:"Curveball",velo:80},{type:"Changeup",velo:87}]},
+  {name:"Aaron Nola",team:"PHI",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:91},{type:"Curveball",velo:74},{type:"Changeup",velo:81},{type:"Sinker",velo:90},{type:"Cutter",velo:87}]},
+  {name:"Kodai Senga",team:"NYM",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Splitter",velo:86},{type:"Slider",velo:86},{type:"Curveball",velo:78}]},
+  {name:"Freddie Peralta",team:"MIL",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Curveball",velo:78},{type:"Slider",velo:85},{type:"Changeup",velo:85}]},
+  {name:"Spencer Strider",team:"ATL",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:89},{type:"Changeup",velo:87}]},
+  // SP - NL Central
+  {name:"Paul Skenes",team:"PIT",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:100},{type:"Splitter",velo:88},{type:"Slider",velo:88},{type:"Curveball",velo:80}]},
+  {name:"Jacob Misiorowski",team:"MIL",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:88},{type:"Curveball",velo:79}]},
+  {name:"Matthew Liberatore",team:"STL",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Curveball",velo:76},{type:"Changeup",velo:83},{type:"Slider",velo:82}]},
+  {name:"Cade Cavalli",team:"CIN",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Curveball",velo:79},{type:"Changeup",velo:86}]},
+  {name:"Matthew Boyd",team:"CHC",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:81},{type:"Changeup",velo:83},{type:"Curveball",velo:74}]},
+  {name:"Andrew Abbott",team:"CIN",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Slider",velo:82},{type:"Curveball",velo:75},{type:"Changeup",velo:83}]},
+  // SP - NL West
+  {name:"Yoshinobu Yamamoto",team:"LAD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Splitter",velo:86},{type:"Slider",velo:84},{type:"Curveball",velo:78},{type:"Sinker",velo:94}]},
+  {name:"Logan Webb",team:"SF",hand:"R",role:"SP",pitches:[{type:"Sinker",velo:90},{type:"2-Seam FB",velo:90},{type:"Changeup",velo:84},{type:"Slider",velo:84},{type:"Curveball",velo:76}]},
+  {name:"Zac Gallen",team:"ARI",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:83},{type:"Changeup",velo:84},{type:"Cutter",velo:88},{type:"Curveball",velo:76}]},
+  {name:"Nick Pivetta",team:"SD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Curveball",velo:79},{type:"Slider",velo:85},{type:"Changeup",velo:84}]},
+  {name:"Kyle Freeland",team:"COL",hand:"L",role:"SP",pitches:[{type:"Sinker",velo:90},{type:"Cutter",velo:86},{type:"Curveball",velo:75},{type:"Changeup",velo:82}]},
+  {name:"Drew Rasmussen",team:"TB",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Cutter",velo:91},{type:"Slider",velo:86},{type:"Sinker",velo:95}]},
+  {name:"Dylan Cease",team:"SD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Curveball",velo:79},{type:"Changeup",velo:86}]},
+  {name:"Sandy Alcantara",team:"MIA",hand:"R",role:"SP",pitches:[{type:"Sinker",velo:96},{type:"Slider",velo:88},{type:"Changeup",velo:88},{type:"4-Seam FB",velo:96},{type:"Curveball",velo:82}]},
+  {name:"Yu Darvish",team:"SD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Cutter",velo:87},{type:"Slider",velo:82},{type:"Splitter",velo:84},{type:"Curveball",velo:76},{type:"Sinker",velo:91}]},
+  {name:"Sonny Gray",team:"STL",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:91},{type:"Slider",velo:82},{type:"Curveball",velo:76},{type:"Changeup",velo:82},{type:"Sinker",velo:90}]},
+  {name:"Pablo Lopez",team:"MIN",hand:"R",role:"SP",pitches:[{type:"Changeup",velo:84},{type:"4-Seam FB",velo:92},{type:"Slider",velo:83},{type:"Sinker",velo:91},{type:"Curveball",velo:76}]},
+  {name:"MacKenzie Gore",team:"WSH",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Slider",velo:82},{type:"Changeup",velo:84},{type:"Curveball",velo:75}]},
+  {name:"Bryce Miller",team:"SEA",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Cutter",velo:90},{type:"Slider",velo:86},{type:"Curveball",velo:78}]},
+  {name:"Logan Gilbert",team:"SEA",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Slider",velo:85},{type:"Changeup",velo:85},{type:"Curveball",velo:77},{type:"Sinker",velo:93}]},
+  {name:"Justin Verlander",team:"DET",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Curveball",velo:75},{type:"Slider",velo:84},{type:"Changeup",velo:84},{type:"Sinker",velo:92}]},
+  {name:"Framber Valdez",team:"DET",hand:"L",role:"SP",pitches:[{type:"Sinker",velo:93},{type:"Curveball",velo:74},{type:"Changeup",velo:87},{type:"4-Seam FB",velo:93}]},
+  {name:"Blake Snell",team:"SF",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Curveball",velo:77},{type:"Slider",velo:83},{type:"Changeup",velo:84}]},
+  {name:"Julio Urias",team:"LAD",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:80},{type:"Changeup",velo:84},{type:"Curveball",velo:74}]},
+  {name:"Shane Bieber",team:"CLE",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:83},{type:"Curveball",velo:75},{type:"Changeup",velo:84}]},
+  {name:"Tanner Bibee",team:"CLE",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Slider",velo:84},{type:"Changeup",velo:83},{type:"Curveball",velo:76}]},
+  {name:"Ryan Pepiot",team:"TB",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Changeup",velo:83},{type:"Slider",velo:84},{type:"Curveball",velo:77}]},
+  {name:"Shota Imanaga",team:"CHC",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:91},{type:"Splitter",velo:82},{type:"Slider",velo:81},{type:"Curveball",velo:73}]},
+  {name:"JP Sears",team:"OAK",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:91},{type:"Changeup",velo:82},{type:"Slider",velo:81},{type:"Cutter",velo:87}]},
+  {name:"Cristopher Sanchez",team:"PHI",hand:"L",role:"SP",pitches:[{type:"Sinker",velo:93},{type:"Slider",velo:83},{type:"Changeup",velo:84},{type:"4-Seam FB",velo:93}]},
+  {name:"Ranger Suarez",team:"PHI",hand:"L",role:"SP",pitches:[{type:"Sinker",velo:92},{type:"Curveball",velo:76},{type:"Cutter",velo:87},{type:"Changeup",velo:83}]},
+  {name:"Roki Sasaki",team:"LAD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:99},{type:"Splitter",velo:89},{type:"Slider",velo:87},{type:"Cutter",velo:93}]},
+  // Closers / Relievers - updated for 2026
+  {name:"Mason Miller",team:"OAK",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:102},{type:"Slider",velo:91},{type:"Sinker",velo:101}]},
+  {name:"Edwin Diaz",team:"LAD",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:89},{type:"Sinker",velo:97}]},
+  {name:"Ryan Helsley",team:"BAL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:100},{type:"Slider",velo:90},{type:"Sinker",velo:99}]},
+  {name:"Aroldis Chapman",team:"BOS",hand:"L",role:"CL",pitches:[{type:"4-Seam FB",velo:99},{type:"Slider",velo:87},{type:"Sinker",velo:98}]},
+  {name:"Jhoan Duran",team:"PHI",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:101},{type:"Splitter",velo:90},{type:"Sinker",velo:100}]},
+  {name:"David Bednar",team:"NYY",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:85},{type:"Changeup",velo:85}]},
+  {name:"Devin Williams",team:"NYM",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:95},{type:"Changeup",velo:82},{type:"Slider",velo:85}]},
+  {name:"Raisel Iglesias",team:"ATL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:86},{type:"Changeup",velo:86}]},
+  {name:"Cade Smith",team:"CLE",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:86},{type:"Changeup",velo:85}]},
+  {name:"Bryan Abreu",team:"HOU",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:89},{type:"Changeup",velo:88}]},
+  {name:"Emmanuel Clase",team:"CLE",hand:"R",role:"CL",pitches:[{type:"Cutter",velo:100},{type:"Sinker",velo:98},{type:"Slider",velo:88}]},
+  {name:"Pete Fairbanks",team:"MIA",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:88},{type:"Splitter",velo:87}]},
+  {name:"Jeff Hoffman",team:"TOR",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Curveball",velo:79}]},
+  {name:"Kenley Jansen",team:"DET",hand:"R",role:"CL",pitches:[{type:"Cutter",velo:90},{type:"4-Seam FB",velo:91},{type:"Sinker",velo:90},{type:"Curveball",velo:75}]},
+  {name:"Paul Sewald",team:"ARI",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:93},{type:"Slider",velo:85},{type:"Changeup",velo:85}]},
+  {name:"Seranthony Dominguez",team:"CWS",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Sinker",velo:96}]},
+  {name:"Jordan Romano",team:"LAA",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Cutter",velo:91}]},
+  {name:"Camilo Doval",team:"NYY",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:89},{type:"Sinker",velo:97}]},
+  {name:"Josh Hader",team:"HOU",hand:"L",role:"RP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:83},{type:"Sweeper",velo:81}]},
+  {name:"Andres Munoz",team:"SEA",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:100},{type:"Slider",velo:90},{type:"Sinker",velo:99}]},
+  {name:"Robert Suarez",team:"ATL",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:99},{type:"Slider",velo:89},{type:"Sinker",velo:98}]},
+  {name:"Tanner Scott",team:"LAD",hand:"L",role:"RP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:83},{type:"Sinker",velo:94}]},
+  {name:"Evan Phillips",team:"LAD",hand:"R",role:"RP",pitches:[{type:"Slider",velo:87},{type:"4-Seam FB",velo:94},{type:"Sinker",velo:93}]},
+  {name:"Michael King",team:"SD",hand:"R",role:"RP",pitches:[{type:"Cutter",velo:92},{type:"4-Seam FB",velo:94},{type:"Slider",velo:85},{type:"Sinker",velo:93}]},
+  {name:"Brusdar Graterol",team:"LAD",hand:"R",role:"RP",pitches:[{type:"Sinker",velo:100},{type:"Slider",velo:91},{type:"4-Seam FB",velo:100}]},
+  {name:"Yennier Cano",team:"BAL",hand:"R",role:"RP",pitches:[{type:"Sinker",velo:97},{type:"Slider",velo:87},{type:"4-Seam FB",velo:97}]},
+  {name:"A.J. Minter",team:"ATL",hand:"L",role:"RP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:84},{type:"Changeup",velo:85}]},
+  {name:"Gregory Soto",team:"PIT",hand:"L",role:"RP",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:84},{type:"Sinker",velo:96}]},
+  {name:"Dennis Santana",team:"PIT",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Sinker",velo:96}]},
+  {name:"Abner Uribe",team:"MIL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:99},{type:"Slider",velo:89},{type:"Sinker",velo:98}]},
+  {name:"Trevor Megill",team:"MIL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Curveball",velo:79}]},
+  {name:"Daniel Palencia",team:"CHC",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:99},{type:"Slider",velo:88}]},
+  {name:"Bryan King",team:"MIL",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:86},{type:"Changeup",velo:85}]},
+  {name:"Clay Holmes",team:"NYM",hand:"R",role:"RP",pitches:[{type:"Sinker",velo:97},{type:"Slider",velo:86},{type:"4-Seam FB",velo:96}]},
+  {name:"Yimi Garcia",team:"TOR",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Splitter",velo:86}]},
+  {name:"Griffin Jax",team:"TB",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:94},{type:"Sweeper",velo:83},{type:"Slider",velo:85}]},
+  {name:"Emilio Pagan",team:"CIN",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:86},{type:"Changeup",velo:85}]},
+  {name:"Alexis Diaz",team:"CIN",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Changeup",velo:86}]},
+  {name:"Felix Bautista",team:"BAL",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:99},{type:"Splitter",velo:88},{type:"Slider",velo:89}]},
+  {name:"Garrett Whitlock",team:"BOS",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:94},{type:"Splitter",velo:84},{type:"Slider",velo:84},{type:"Sinker",velo:93}]},
+  {name:"Luke Weaver",team:"NYM",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:94},{type:"Slider",velo:84},{type:"Changeup",velo:84},{type:"Curveball",velo:77}]},
+  {name:"Ryne Stanek",team:"STL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:97},{type:"Sweeper",velo:85},{type:"Slider",velo:87}]},
+];
+
+// ─── Pitch Logic ──────────────────────────────────────────────────────────────
+const PITCH_PROFILES = {
+  "4-Seam FB":  {h:8,  v:14, velo_base:93, type:"fastball"},
+  "2-Seam FB":  {h:14, v:8,  velo_base:91, type:"fastball"},
+  "Cutter":     {h:-3, v:10, velo_base:88, type:"fastball"},
+  "Sinker":     {h:16, v:6,  velo_base:90, type:"fastball"},
+  "Slider":     {h:-4, v:2,  velo_base:84, type:"breaking"},
+  "Sweeper":    {h:-14,v:1,  velo_base:82, type:"breaking"},
+  "Curveball":  {h:-5, v:-8, velo_base:78, type:"breaking"},
+  "12-6 Curve": {h:0,  v:-12,velo_base:76, type:"breaking"},
+  "Changeup":   {h:12, v:5,  velo_base:84, type:"offspeed"},
+  "Splitter":   {h:6,  v:-2, velo_base:84, type:"offspeed"},
+  "Knuckleball":{h:0,  v:0,  velo_base:70, type:"offspeed"},
+};
+
+const COUNT_LEVERAGE = {
+  "0-0":{fastball:1.1,breaking:0.9,offspeed:0.9},"0-1":{fastball:1.0,breaking:1.1,offspeed:1.0},
+  "0-2":{fastball:0.8,breaking:1.3,offspeed:1.2},"1-0":{fastball:1.2,breaking:0.8,offspeed:0.9},
+  "1-1":{fastball:1.0,breaking:1.0,offspeed:1.0},"1-2":{fastball:0.9,breaking:1.2,offspeed:1.1},
+  "2-0":{fastball:1.3,breaking:0.7,offspeed:0.8},"2-1":{fastball:1.1,breaking:0.9,offspeed:1.0},
+  "2-2":{fastball:0.9,breaking:1.1,offspeed:1.1},"3-0":{fastball:1.4,breaking:0.6,offspeed:0.7},
+  "3-1":{fastball:1.2,breaking:0.8,offspeed:0.9},"3-2":{fastball:1.0,breaking:1.0,offspeed:1.0},
+};
+
+const ZONE_REC = {
+  "4-Seam FB": {R:"1-3",L:"1-1"},
+  "2-Seam FB": {R:"3-3",L:"3-1"},
+  "Cutter":    {R:"1-1",L:"1-3"},
+  "Sinker":    {R:"3-3",L:"3-1"},
+  "Slider":    {R:"3-1",L:"3-3"},   // backdoor low
+  "Sweeper":   {R:"3-0",L:"3-4"},
+  "Curveball": {R:"3-2",L:"3-2"},
+  "12-6 Curve":{R:"4-2",L:"4-2"},   // mostly chase, low
+  "Changeup":  {R:"3-3",L:"3-1"},
+  "Splitter":  {R:"4-2",L:"4-2"},   // chase/low
+  "Knuckleball":{R:"2-2",L:"2-2"},
+};
+const ZONE_CHASE={
+  "4-Seam FB": {R:"0-3",L:"0-1"},
+  "2-Seam FB": {R:"4-3",L:"4-1"},
+  "Cutter":    {R:"0-1",L:"0-3"},
+  "Sinker":    {R:"4-3",L:"4-1"},
+  "Slider":    {R:"4-0",L:"4-4"},
+  "Sweeper":   {R:"4-0",L:"4-4"},
+  "Curveball": {R:"4-2",L:"4-2"},
+  "12-6 Curve":{R:"4-2",L:"4-2"},
+  "Changeup":  {R:"4-3",L:"4-1"},
+  "Splitter":  {R:"4-2",L:"4-2"},
+  "Knuckleball":{R:"4-2",L:"4-2"},
+};
+const CHASE_WEIGHT={"0-1":0.3,"0-2":0.6,"1-2":0.45};
+
+// Game-specific zone quality scoring (MLB The Show mechanics)
+// zone id = "row-col", rows 0=high..4=low, cols 0=away..4=inside (from batter's perspective)
+// Returns bonus/penalty to add to score based on pitch type, zone, matchup handedness
+function gameZoneBonus(pitchType,zoneId,pitcherHand,batterHand){
+  if(!zoneId) return 0;
+  const[r,c]=zoneId.split("-").map(Number);
+  const inZone=r>=1&&r<=3&&c>=1&&c<=3;
+  const sameHand=pitcherHand===batterHand;
+  const prof=PITCH_PROFILES[pitchType];
+  const isFast=prof?.type==="fastball";
+  const isBreaking=prof?.type==="breaking";
+  const isOffspeed=prof?.type==="offspeed";
+  const isSinker=pitchType==="Sinker";
+  const isSlider=pitchType==="Slider"||pitchType==="Sweeper";
+  const isCutter=pitchType==="Cutter";
+  const isCurve=pitchType==="Curveball"||pitchType==="12-6 Curve";
+
+  // Column definitions from batter's perspective:
+  // col 0,1 = away side; col 2 = middle; col 3,4 = inside
+  const isAway=c<=1; const isMid=c===2; const isInside=c>=3;
+  const isHigh=r<=1; const isMidV=r===2; const isLow=r>=3;
+  const isWayInside=c===4; const isWayAway=c===0;
+
+  let bonus=0;
+
+  if(isFast){
+    // High in zone: always good
+    if(isHigh&&inZone) bonus+=12;
+    // High middle: ok
+    if(isHigh&&isMid&&inZone) bonus+=5;
+    // Middle middle / low middle: bad
+    if(isMid&&inZone&&!isHigh) bonus-=15;
+    if(isLow&&isMid&&inZone) bonus-=20;
+    // Away in zone: bad for fastballs
+    if(isAway&&inZone) bonus-=10;
+    // Inside same hand: good
+    if(isInside&&inZone&&sameHand) bonus+=10;
+    // Inside opposite hand: bad (gets barrel)
+    if(isInside&&inZone&&!sameHand) bonus-=18;
+    // Way inside opp hand (ball): ok as waste
+    if(isWayInside&&!inZone&&!sameHand) bonus+=5;
+    // Low in zone: not great for fast
+    if(isLow&&inZone&&!isMid) bonus-=8;
+    // Sinker: same hand inside works
+    if(isSinker&&isInside&&sameHand) bonus+=8;
+  }
+
+  if(isBreaking){
+    // Slider / Sweeper: bad in zone, good outside
+    if(isSlider){
+      if(inZone) bonus-=14;
+      if(!inZone) bonus+=10;
+      // Backdoor slider (away side, low) same hand: good even in zone
+      if(isAway&&isLow&&sameHand) bonus+=18;
+      // Backdoor middle: decent
+      if(isAway&&isMidV&&sameHand) bonus+=10;
+    }
+    // Cutter: backdoor low and middle good
+    if(isCutter){
+      if(isAway&&isLow) bonus+=16;
+      if(isAway&&isMidV) bonus+=10;
+      if(isAway&&isHigh) bonus+=4;
+      if(isInside&&inZone&&!sameHand) bonus-=16;
+    }
+    // Curveball: high/low ok, not inside
+    if(isCurve){
+      if(isInside&&inZone) bonus-=12;
+      if(!inZone&&isLow) bonus+=8;
+      if(isHigh&&inZone) bonus+=5; // 12-6 high then break down
+    }
+  }
+
+  if(isOffspeed){
+    // Off-speed inside in zone: bad unless same hand and away
+    if(isInside&&inZone&&!sameHand) bonus-=16;
+    if(isInside&&inZone&&sameHand) bonus-=6; // still risky
+    // Off-speed outside in zone: good
+    if(isAway&&inZone) bonus+=12;
+    // Off-speed outside of zone: also good
+    if(isAway&&!inZone) bonus+=8;
+    // Off-speed middle: risky
+    if(isMid&&inZone) bonus-=8;
+  }
+
+  return bonus;
+}
+
+function getMovement(pitch,velo,hand){
+  const p=PITCH_PROFILES[pitch]; if(!p) return {h:0,v:0};
+  const s=0.8+0.2*(velo/p.velo_base);
+  let h=p.h*s,v=p.v*s;
+  if(hand==="L") h=-h;
+  return {h,v};
+}
+
+function tunnelScore(p1,p2,v1,v2,hand){
+  const m1=getMovement(p1,v1,hand),m2=getMovement(p2,v2,hand);
+  const vd=Math.abs(v1-v2),hd=Math.abs(m1.h-m2.h),vdd=Math.abs(m1.v-m2.v);
+  return Math.min(100,Math.max(0,100-hd*2-vdd*2)+(vd>=8&&vd<=18?15:vd>18?5:-5));
+}
+
+function getTunnelReason(last,rec,score){
+  const lp=PITCH_PROFILES[last],rp=PITCH_PROFILES[rec];
+  if(!lp||!rp) return "Good sequencing option";
+  if(score>=70) return `Strong tunnel off ${last}`;
+  if(lp.type===rp.type) return `Mix in a different shape`;
+  if(rp.type==="offspeed"&&lp.type==="fastball") return `Velocity change off ${last}`;
+  if(rp.type==="breaking"&&lp.type==="fastball") return `Breaking ball tunnels off fastball`;
+  if(rp.type==="fastball"&&lp.type!=="fastball") return `Reset hitter's eye with heater`;
+  return `Good shape contrast to ${last}`;
+}
+
+const OUTCOMES=[
+  {id:"ball",label:"Ball",color:C.textMid},
+  {id:"look",label:"Strike 👀",color:C.green},
+  {id:"swing",label:"Strike 🏏",color:C.green},
+  {id:"foul",label:"Foul",color:C.gold},
+  {id:"hard",label:"In Play Hard",color:C.warn},
+  {id:"weak",label:"In Play Weak",color:C.textSoft},
+  {id:"hbp",label:"HBP",color:C.blue},
+];
+const POSITIVE_IDS=["look","swing","weak"];
+const OUT_IDS=["swing","weak"];
+
+const PITCH_TYPES=["4-Seam FB","2-Seam FB","Cutter","Sinker","Slider","Sweeper","Curveball","12-6 Curve","Changeup","Splitter","Knuckleball"];
+const BAT_OPTS=[{val:"R",label:"RHB"},{val:"L",label:"LHB"},{val:"S",label:"Switch"}];
+
+// ─── Zone Grid ────────────────────────────────────────────────────────────────
+function ZoneGrid({onSelect,selected,recommended}){
+  const zones=[];
+  for(let r=0;r<5;r++) for(let c=0;c<5;c++) zones.push({id:`${r}-${c}`,inZone:r>=1&&r<=3&&c>=1&&c<=3});
+  return(
+    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3}}>
+      {zones.map(z=>{
+        const isSel=z.id===selected,isRec=z.id===recommended;
+        return(
+          <div key={z.id} onClick={()=>onSelect(z.id)} style={{
+            borderRadius:6,minHeight:44,cursor:"pointer",transition:"all 0.1s",
+            background:isSel?C.green:isRec?C.blueLight:z.inZone?C.white:C.surface,
+            border:`1.5px solid ${isSel?C.green:isRec?C.blue:C.border}`,
+            boxShadow:isSel?`0 0 0 3px ${C.greenLight}`:isRec?`0 0 0 2px ${C.blueLight}`:"none",
+            display:"flex",alignItems:"center",justifyContent:"center",
+          }}>
+            {isRec&&!isSel&&<span style={{fontSize:18}}>🔵</span>}
+            {isSel&&<span style={{fontSize:18}}>🟢</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Lineup Setup ─────────────────────────────────────────────────────────────
+function LineupSetup({onSave}){
+  const [query,setQuery]=useState("");
+  const [lineup,setLineup]=useState(Array(9).fill(null).map(()=>({name:"",bat:"R",custom:false})));
+  const [activeSlot,setActiveSlot]=useState(null);
+  const [apiResults,setApiResults]=useState([]);
+  const [apiLoading,setApiLoading]=useState(false);
+  const proxyReady = true;
+
+  const localResults=useMemo(()=>{
+    if(query.length<2) return [];
+    const q=query.toLowerCase();
+    return MLB_BATTERS.filter(b=>b.name.toLowerCase().includes(q)).slice(0,6);
+  },[query]);
+
+  useEffect(()=>{
+    if(query.length<2){setApiResults([]);return;}
+    const t=setTimeout(async()=>{
+      setApiLoading(true);
+      try{
+        const res=await searchBatters(query);
+        setApiResults(res.slice(0,8));
+      }catch(e){setApiResults([]);}
+      finally{setApiLoading(false);}
+    },400);
+    return()=>clearTimeout(t);
+  },[query]);
+
+  const results=proxyReady?(apiResults.length>0?apiResults:localResults):localResults;
+
+  const selectBatter=(slot,batter)=>{
+    const next=[...lineup];
+    next[slot]={name:batter.name,bat:batter.bat,custom:false,ovr:batter.ovr,speed:batter.speed};
+    setLineup(next);
+    setActiveSlot(null);
+    setQuery("");
+    setApiResults([]);
+  };
+
+  const updateSlot=(slot,field,val)=>{
+    const next=[...lineup];
+    next[slot]={...next[slot],[field]:val};
+    setLineup(next);
+  };
+
+  const autoGenLineup=()=>{
+    const shuffled=[...MLB_BATTERS].sort(()=>Math.random()-0.5).slice(0,9);
+    setLineup(shuffled.map(b=>({name:b.name,bat:b.bat,custom:false})));
+  };
+
+  const canSave=lineup.some(s=>s.name.trim());
+
+  return(
+    <div style={{padding:"16px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+        <div style={S.sectionLabel}>Opposing Lineup</div>
+        <button onClick={autoGenLineup} style={S.ghostBtn}>🎲 Auto-Fill</button>
+      </div>
+      <div style={{fontSize:11,color:apiResults.length>0?C.green:C.textSoft,marginBottom:12,fontWeight:600}}>
+        {apiLoading?"Searching DD cards...":apiResults.length>0?"🟢 DD cards found":"Search by name to find DD cards or local players"}
+      </div>
+      {lineup.map((slot,i)=>(
+        <div key={i} style={{
+          background:C.white,border:`1.5px solid ${activeSlot===i?C.greenMid:C.border}`,
+          borderRadius:8,padding:"8px 10px",marginBottom:6,
+        }}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span style={{color:C.textSoft,fontSize:11,fontWeight:800,width:18}}>{i+1}.</span>
+            <input
+              value={slot.name}
+              onChange={e=>{updateSlot(i,"name",e.target.value);setActiveSlot(i);setQuery(e.target.value);}}
+              onFocus={()=>{setActiveSlot(i);setQuery(slot.name);}}
+              placeholder={`Batter ${i+1}`}
+              style={{...S.input,flex:1,padding:"6px 8px",fontSize:12}}
+            />
+            <div style={{display:"flex",gap:3}}>
+              {BAT_OPTS.map(o=>(
+                <button key={o.val} onClick={()=>updateSlot(i,"bat",o.val)} style={{
+                  padding:"4px 7px",borderRadius:5,fontSize:10,fontWeight:700,
+                  fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+                  background:slot.bat===o.val?C.green:C.surface,
+                  color:slot.bat===o.val?"#fff":C.textMid,
+                  border:`1px solid ${slot.bat===o.val?C.green:C.border}`,
+                }}>{o.label}</button>
+              ))}
+            </div>
+          </div>
+          {/* OVR badge if from API */}
+          {slot.ovr&&<div style={{fontSize:10,color:C.textSoft,fontWeight:600,marginTop:2,marginLeft:22}}>OVR {slot.ovr}{slot.speed?` · SPD ${slot.speed}`:""}</div>}
+          {activeSlot===i&&query.length>=2&&(
+            <div style={{border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden",marginTop:6}}>
+              {apiLoading&&<div style={{padding:"8px 10px",fontSize:11,color:C.textSoft}}>Searching DD cards...</div>}
+              {!apiLoading&&results.map(b=>(
+                <div key={b.name+(b.ovr||"")} onClick={()=>selectBatter(i,b)} style={{
+                  padding:"8px 10px",background:C.white,cursor:"pointer",
+                  borderBottom:`1px solid ${C.border}`,
+                  display:"flex",justifyContent:"space-between",alignItems:"center",
+                }}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:12,color:C.text}}>{b.name}</div>
+                    {(b.rarity||b.series)&&<div style={{fontSize:10,color:C.textSoft}}>{[b.rarity,b.series,b.team].filter(Boolean).join(" · ")}</div>}
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    {b.ovr>0&&<div style={{fontSize:12,fontWeight:800,color:C.green}}>{b.ovr}</div>}
+                    <div style={{fontSize:10,color:C.textSoft}}>{b.bat}H</div>
+                  </div>
+                </div>
+              ))}
+              {!apiLoading&&results.length===0&&<div style={{padding:"8px 10px",fontSize:11,color:C.textSoft}}>No results</div>}
+            </div>
+          )}
+        </div>
+      ))}
+      <button onClick={()=>canSave&&onSave(lineup)} style={{...S.primaryBtn,opacity:canSave?1:0.4,marginTop:8}} disabled={!canSave}>
+        Save Lineup
+      </button>
+    </div>
+  );
+}
+
+// ─── Setup Tab ────────────────────────────────────────────────────────────────
+const PITCH_TYPES_LIST=PITCH_TYPES;
+
+function SetupTab({onComplete}){
+  const [query,setQuery]=useState("");
+  const [batterHand,setBatterHand]=useState("R");
+  const [pitches,setPitches]=useState([]);
+  const [selectedName,setSelectedName]=useState("");
+  const [pitcherHand,setPitcherHand]=useState("R");
+  const [lineup,setLineup]=useState(null);
+  const [view,setView]=useState("pitcher");
+  const [apiResults,setApiResults]=useState([]);
+  const [apiLoading,setApiLoading]=useState(false);
+  const [apiError,setApiError]=useState("");
+  const proxyReady = true;
+
+  const localResults=useMemo(()=>{
+    if(query.length<2) return [];
+    const q=query.toLowerCase();
+    return PITCHERS.filter(p=>p.name.toLowerCase().includes(q)).slice(0,6);
+  },[query]);
+
+  useEffect(()=>{
+    if(query.length<2||selectedName){setApiResults([]);setApiError("");return;}
+    const t=setTimeout(async()=>{
+      setApiLoading(true);
+      setApiError("");
+      try{
+        console.log("Searching API for:", query);
+        const res=await searchPitchers(query);
+        console.log("API returned:", res.length, "pitchers", res);
+        setApiResults(res.slice(0,8));
+        if(res.length===0) setApiError("No DD pitchers found");
+      }catch(e){
+        console.error("API search error:", e);
+        setApiError(e.message);
+        setApiResults([]);
+      }
+      finally{setApiLoading(false);}
+    },400);
+    return()=>clearTimeout(t);
+  },[query,selectedName]);
+
+  const results=proxyReady?(apiResults.length>0?apiResults:localResults):localResults;
+
+  const selectPitcher=(p)=>{
+    setSelectedName(p.name);setPitcherHand(p.hand||"R");
+    setPitches((p.pitches||[]).map(x=>({...x})));setQuery(p.name);
+    setApiResults([]);
+  };
+  const addPitch=()=>pitches.length<7&&setPitches([...pitches,{type:"4-Seam FB",velo:93}]);
+  const removePitch=(i)=>setPitches(pitches.filter((_,idx)=>idx!==i));
+  const updatePitch=(i,field,val)=>{
+    const next=[...pitches];
+    next[i]={...next[i],[field]:field==="velo"?parseInt(val)||0:val};
+    setPitches(next);
+  };
+
+  const autoGen=()=>{
+    const p=PITCHERS[Math.floor(Math.random()*PITCHERS.length)];
+    selectPitcher(p);
+    const shuffled=[...MLB_BATTERS].sort(()=>Math.random()-0.5).slice(0,9);
+    setLineup(shuffled.map(b=>({name:b.name,bat:b.bat,custom:false})));
+  };
+
+  const canStart=pitches.length>=2;
+
+  // Determine current batter from lineup
+  const [batterIdx,setBatterIdx]=useState(0);
+  const currentBatter=lineup?lineup[batterIdx]:null;
+  const effectiveBatterHand=currentBatter
+    ? (currentBatter.bat==="S"?"R":currentBatter.bat)
+    : batterHand;
+
+  return(
+    <div style={{padding:"0"}}>
+      {/* Sub-tabs */}
+      <div style={{display:"flex",borderBottom:`1.5px solid ${C.border}`,background:C.white}}>
+        {["pitcher","lineup"].map(v=>(
+          <button key={v} onClick={()=>setView(v)} style={{
+            flex:1,padding:"10px",fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+            background:"none",border:"none",borderBottom:`2px solid ${view===v?C.greenMid:"transparent"}`,
+            color:view===v?C.green:C.textSoft,cursor:"pointer",textTransform:"uppercase",letterSpacing:"0.06em",
+          }}>{v==="pitcher"?"My Pitcher":"Opp. Lineup"}</button>
+        ))}
+      </div>
+
+      {view==="pitcher"&&(
+        <div style={{padding:"16px"}}>
+          <div style={{marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={S.label}>Pitcher Search</div>
+              <span style={{fontSize:10,fontWeight:700,color:apiError?C.warn:apiResults.length>0?C.green:C.textSoft}}>
+                {apiLoading?"Searching...":apiError?`⚠ ${apiError}`:apiResults.length>0?"🟢 DD cards":"⚪ Local DB"}
+              </span>
+            </div>
+            <input value={query} onChange={e=>{setQuery(e.target.value);if(e.target.value!==selectedName)setSelectedName("");}}
+              placeholder="Search name or card..." style={{...S.input,width:"100%",boxSizing:"border-box"}}/>
+            {(apiLoading||results.length>0)&&!selectedName&&(
+              <div style={{border:`1.5px solid ${C.border}`,borderRadius:8,overflow:"hidden",marginTop:4}}>
+                {apiLoading&&<div style={{padding:"10px 14px",fontSize:12,color:C.textSoft}}>Searching DD cards...</div>}
+                {!apiLoading&&results.map((p,i)=>(
+                  <div key={p.name+(p.ovr||"")+i} onClick={()=>selectPitcher(p)} style={{
+                    padding:"10px 14px",background:C.white,cursor:"pointer",
+                    borderBottom:`1px solid ${C.border}`,
+                    display:"flex",justifyContent:"space-between",alignItems:"center",
+                  }}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:13,color:C.text}}>{p.name}</div>
+                      <div style={{fontSize:10,color:C.textSoft,marginTop:1}}>
+                        {[p.rarity,p.series,p.team].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      {p.ovr>0&&<div style={{fontSize:13,fontWeight:800,color:C.green}}>{p.ovr}</div>}
+                      <div style={{fontSize:10,color:C.textSoft}}>{p.hand}H · {p.role}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{display:"flex",gap:12,marginBottom:16}}>
+            <div style={{flex:1}}>
+              <div style={S.label}>Pitcher Hand</div>
+              <div style={{display:"flex",gap:6}}>
+                {["R","L"].map(h=><button key={h} onClick={()=>setPitcherHand(h)} style={pitcherHand===h?S.toggleOn:S.toggleOff}>{h}HP</button>)}
+              </div>
+            </div>
+            {!lineup&&(
+              <div style={{flex:1}}>
+                <div style={S.label}>Batter Hand</div>
+                <div style={{display:"flex",gap:4}}>
+                  {BAT_OPTS.map(o=><button key={o.val} onClick={()=>setBatterHand(o.val)} style={batterHand===o.val?S.toggleOn:{...S.toggleOff,padding:"9px 10px",fontSize:11}}>{o.label}</button>)}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {pitches.length>0&&(
+            <div style={{marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={S.label}>Arsenal <span style={{color:C.textSoft,fontWeight:500}}>({pitches.length}/7)</span></div>
+                {pitches.length<7&&<button onClick={addPitch} style={S.ghostBtn}>+ Add</button>}
+              </div>
+              {pitches.map((p,i)=>(
+                <div key={i} style={S.pitchRow}>
+                  <select value={p.type} onChange={e=>updatePitch(i,"type",e.target.value)} style={S.select}>
+                    {PITCH_TYPES_LIST.map(t=><option key={t}>{t}</option>)}
+                  </select>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <input type="number" value={p.velo} onChange={e=>updatePitch(i,"velo",e.target.value)} style={S.veloInput} min={60} max={105}/>
+                    <span style={{color:C.textSoft,fontSize:12,fontWeight:600}}>mph</span>
+                    {pitches.length>1&&<button onClick={()=>removePitch(i)} style={S.removeBtn}>✕</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {pitches.length===0&&selectedName&&(
+            <div style={{color:C.textSoft,fontSize:12,textAlign:"center",padding:16}}>No arsenal found — add pitches manually.</div>
+          )}
+          {pitches.length===0&&!selectedName&&(
+            <div style={{marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={S.label}>Arsenal (custom)</div>
+                <button onClick={addPitch} style={S.ghostBtn}>+ Add Pitch</button>
+              </div>
+            </div>
+          )}
+
+          {/* Auto-gen for testing */}
+          <button onClick={autoGen} style={{...S.secondaryBtn,marginBottom:8}}>
+            🎲 Auto-Generate (Testing)
+          </button>
+
+          <button onClick={()=>canStart&&onComplete({pitcherHand,batterHand:effectiveBatterHand,pitches,lineup,batterIdx,setBatterIdx})}
+            style={{...S.primaryBtn,opacity:canStart?1:0.4}} disabled={!canStart}>
+            Start Game
+          </button>
+        </div>
+      )}
+
+      {view==="lineup"&&(
+        <LineupSetup onSave={saved=>{setLineup(saved);setView("pitcher");}}/>
+      )}
+    </div>
+  );
+}
+
+// ─── Zone label helper ────────────────────────────────────────────────────────
+function zoneLabel(id){
+  if(!id) return "";
+  const[r,c]=id.split("-").map(Number);
+  const rows=["High","High","Mid","Low","Low"];
+  const cols=["Way Out","Out","Middle","In","Way In"];
+  const inZone=r>=1&&r<=3&&c>=1&&c<=3;
+  return `${rows[r]||""} ${cols[c]||""}${inZone?"":" (ball)"}`.trim();
+}
+
+// ─── Tunnel + location reason ─────────────────────────────────────────────────
+function getFullReason(lastPitch,lastZone,recPitch,recZone,score){
+  const lp=PITCH_PROFILES[lastPitch],rp=PITCH_PROFILES[recPitch];
+  if(!lp||!rp) return "Good sequencing option";
+  const zoneTxt=recZone?` — target ${zoneLabel(recZone)}`:"";
+  // Check if zones are on same horizontal band (same row ±1)
+  let zoneContext="";
+  if(lastZone&&recZone){
+    const[lr,lc]=lastZone.split("-").map(Number);
+    const[rr,rc]=recZone.split("-").map(Number);
+    const sameRow=Math.abs(lr-rr)<=1;
+    const sameCol=Math.abs(lc-rc)<=1;
+    if(sameRow&&sameCol) zoneContext=" Same quadrant reinforces tunnel — hitter sees identical release.";
+    else if(sameRow) zoneContext=" Same vertical band — tunnel holds, breaks to a different side.";
+    else zoneContext=" Different vertical band — tunnel relies on release point match, not location.";
+  }
+  if(score>=70) return `Strong tunnel off ${lastPitch}${zoneTxt}.${zoneContext}`;
+  if(lp.type===rp.type) return `Same pitch family — mix a different shape${zoneTxt}.${zoneContext}`;
+  if(rp.type==="offspeed"&&lp.type==="fastball") return `Velocity change off ${lastPitch}${zoneTxt}.${zoneContext}`;
+  if(rp.type==="breaking"&&lp.type==="fastball") return `Breaking ball off fastball tunnel${zoneTxt}.${zoneContext}`;
+  if(rp.type==="fastball"&&lp.type!=="fastball") return `Reset hitter's eye with heater${zoneTxt}.${zoneContext}`;
+  return `Shape contrast to ${lastPitch}${zoneTxt}.${zoneContext}`;
+}
+
+// ─── At-Bat Tab ───────────────────────────────────────────────────────────────
+function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
+  const{pitcherHand,pitches,sequence,outcomes,gameLog,lineup,batterIdx,outs,inning,bases}=session;
+  const[selectedZone,setSelectedZone]=useState(null);
+  const[selectedPitch,setSelectedPitch]=useState(pitches[0].type);
+  const[balls,setBalls]=useState(0);
+  const[strikes,setStrikes]=useState(0);
+  const[showSub,setShowSub]=useState(false);
+  const[subQuery,setSubQuery]=useState("");
+  const[subSlot,setSubSlot]=useState(null);
+  const[contactPending,setContactPending]=useState(null);
+  const[showOutConfirm,setShowOutConfirm]=useState(false);
+  // Hit type flow: "single"|"double"|"triple"|"hr"|null
+  const[hitType,setHitType]=useState(null);
+  // Runner advancement: list of runners that need to be resolved
+  const[runnersToResolve,setRunnersToResolve]=useState([]); // [{base,name}]
+  const[resolvedRunners,setResolvedRunners]=useState([]); // {base->newBase or "scored"}
+  const[runnerResolutionIdx,setRunnerResolutionIdx]=useState(0);
+
+  const currentBatter=lineup?lineup[batterIdx]:null;
+  const effectiveBatterHand=currentBatter?(currentBatter.bat==="S"?"R":currentBatter.bat):session.batterHand;
+  const countKey=`${balls}-${strikes}`;
+  const lastEntry=sequence.length>0?sequence[sequence.length-1]:null;
+  const lastThrown=lastEntry?lastEntry.pitch:null;
+  const lastZone=lastEntry?lastEntry.zone:null;
+
+  const pitchZoneHistory=useMemo(()=>{
+    const map={};
+    gameLog.forEach(e=>{const k=`${e.pitch}:${e.zone}`;map[k]=(map[k]||0)+1;});
+    return map;
+  },[gameLog]);
+
+  const scored=useMemo(()=>{
+    // Repetition cap: find how many consecutive fouls on the same pitch at top of sequence
+    const recentSame=(type)=>{
+      let count=0;
+      for(let i=sequence.length-1;i>=0;i--){
+        const e=sequence[i];
+        if(e.pitch===type&&e.outcomeId==="foul") count++;
+        else break;
+      }
+      return count;
+    };
+
+    // Score differential context
+    const scoreDiff=(session.myScore||0)-(session.oppScore||0);
+    // Behind by 2+: be more aggressive in zone; ahead by 2+: can afford chase pitches more
+    const gameCtx=scoreDiff<=-2?"behind":scoreDiff>=2?"ahead":"tied";
+
+    const chaseWeight=CHASE_WEIGHT[countKey]||0;
+    // Ahead: slightly more chase; behind: slightly less (can't walk guys in)
+    const effectiveChaseWeight=gameCtx==="ahead"?Math.min(chaseWeight+0.1,0.7):gameCtx==="behind"?Math.max(chaseWeight-0.1,0):chaseWeight;
+
+    return pitches.map(p=>{
+      const prof=PITCH_PROFILES[p.type],type=prof?.type||"fastball";
+      const isFastType=type==="fastball";
+      const cm=COUNT_LEVERAGE[countKey]?.[type]||1.0;
+      let score=lastThrown?tunnelScore(lastThrown,p.type,pitches.find(x=>x.type===lastThrown)?.velo||90,p.velo,pitcherHand):60;
+      if(p.type===lastThrown) score-=20;
+      score*=cm;
+      const eff=outcomes[p.type]||0;
+      score+=eff;
+      // Game-specific zone quality bonus
+      const recZ=ZONE_REC[p.type]?.[effectiveBatterHand]||"2-2";
+      score+=gameZoneBonus(p.type,recZ,pitcherHand,effectiveBatterHand);
+
+      const zoneCount=pitchZoneHistory[`${p.type}:${recZ}`]||0;
+      const total=gameLog.length;
+      if(zoneCount>0){
+        score-=total<15?zoneCount*6:eff<=0?zoneCount*3:0;
+      }
+      // Repetition penalty
+      const consecutiveFouls=recentSame(p.type);
+      if(consecutiveFouls>=3) score-=consecutiveFouls*12;
+
+      // Steal threat: runner on 1st or 2nd flagged fast -> boost fastball frequency
+      const currentBases=session.bases||{first:null,second:null,third:null};
+      const stealThreat=(currentBases.first?.fast||currentBases.second?.fast);
+      if(stealThreat&&isFastType) score+=10;
+
+      return{...p,score:Math.round(Math.min(100,Math.max(0,score))),chaseWeight:effectiveChaseWeight,stealThreat:!!stealThreat};
+    }).sort((a,b)=>b.score-a.score);
+  },[pitches,countKey,lastThrown,outcomes,pitcherHand,pitchZoneHistory,gameLog,effectiveBatterHand,sequence,session]);
+
+  // Active rec drives both the box and the blue baseball
+  const activePitch=scored.find(p=>p.type===selectedPitch)||scored[0];
+  const chaseW=activePitch?.chaseWeight||0;
+  // Deterministic chase decision per at-bat state (use sequence length as seed to avoid re-render flicker)
+  const useChase=chaseW>0&&((sequence.length*17+strikes*7)%100)<(chaseW*100);
+  const recZone=activePitch
+    ?(useChase?(ZONE_CHASE[activePitch.type]?.[effectiveBatterHand]||"4-2"):(ZONE_REC[activePitch.type]?.[effectiveBatterHand]||"2-2"))
+    :"2-2";
+  const isChaseRec=useChase&&chaseW>0;
+  const scoreColor=s=>s>=70?C.green:s>=45?C.gold:C.warn;
+
+  const finalizeOutcome=(outcomeId,outcomeLabel,isOut,isOnBase)=>{
+    const isPositive=["look","swing","weak"].includes(outcomeId)||isOut;
+    onLogPitch({
+      pitch:selectedPitch,zone:selectedZone,
+      outcome:outcomeLabel,outcomeId,
+      isPositive,isOut:isOut||false,
+      onBase:isOnBase||false,
+      batter:currentBatter?.name||"",
+    });
+    if(isOut||isOnBase) setShowOutConfirm(true);
+  };
+
+  const handleOutcome=(oc)=>{
+    if(!selectedZone) return;
+    if(oc.id==="ball"){
+      const nb=balls+1;
+      setBalls(nb);
+      if(nb>=4){
+        // Walk -- log then show confirm
+        onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Walk",outcomeId:"walk",isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||""});
+        setSelectedZone(null);
+        setShowOutConfirm(true);
+      } else { setSelectedZone(null); }
+      return;
+    }
+    if(oc.id==="look"||oc.id==="swing"){
+      const ns=strikes+1;
+      setStrikes(ns);
+      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:oc.label,outcomeId:oc.id,isPositive:true,isOut:false,onBase:false,batter:currentBatter?.name||""});
+      setSelectedZone(null);
+      if(ns>=3) setShowOutConfirm(true); // K -- show confirm
+      return;
+    }
+    if(oc.id==="foul"){
+      if(strikes<2) setStrikes(2);
+      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Foul",outcomeId:"foul",isPositive:false,isOut:false,onBase:false,batter:currentBatter?.name||""});
+      setSelectedZone(null);
+      return;
+    }
+    if(oc.id==="hbp"){
+      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"HBP",outcomeId:"hbp",isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||""});
+      setSelectedZone(null);
+      setShowOutConfirm(true);
+      return;
+    }
+    // hard / weak -- show secondary
+    if(oc.id==="hard"||oc.id==="weak") { setContactPending(oc); setSelectedZone(s=>s); return; }
+  };
+
+  const startHitFlow=(contactOc,hitTypeId)=>{
+    // Log the pitch
+    onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:hitTypeId.charAt(0).toUpperCase()+hitTypeId.slice(1),outcomeId:contactOc.id,isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||""});
+    setSelectedZone(null);
+    setContactPending(null);
+    const currentBases=session.bases||{first:null,second:null,third:null};
+    const occupied=[
+      currentBases.first&&{base:"first",name:currentBases.first.name||"Runner"},
+      currentBases.second&&{base:"second",name:currentBases.second.name||"Runner"},
+      currentBases.third&&{base:"third",name:currentBases.third.name||"Runner"},
+    ].filter(Boolean);
+    if(hitTypeId==="hr"){
+      // Clear all bases
+      onUpdateBases({first:null,second:null,third:null});
+      setShowOutConfirm(true);
+    } else if(occupied.length===0){
+      // No runners -- just place batter
+      const newBases={first:null,second:null,third:null};
+      if(hitTypeId==="single") newBases.first={name:currentBatter?.name||"Batter",fast:false};
+      if(hitTypeId==="double") newBases.second={name:currentBatter?.name||"Batter",fast:false};
+      if(hitTypeId==="triple") newBases.third={name:currentBatter?.name||"Batter",fast:false};
+      onUpdateBases(newBases);
+      setShowOutConfirm(true);
+    } else {
+      // Need to resolve existing runners one at a time
+      setHitType(hitTypeId);
+      setRunnersToResolve(occupied);
+      setRunnerResolutionIdx(0);
+      setResolvedRunners([]);
+    }
+  };
+
+  const resolveRunner=(newBase)=>{
+    const runner=runnersToResolve[runnerResolutionIdx];
+    const next=[...resolvedRunners,{...runner,newBase}];
+    if(runnerResolutionIdx+1>=runnersToResolve.length){
+      // All resolved -- build new bases state
+      const newBases={first:null,second:null,third:null};
+      next.forEach(r=>{
+        if(r.newBase==="first") newBases.first={name:r.name,fast:false};
+        else if(r.newBase==="second") newBases.second={name:r.name,fast:false};
+        else if(r.newBase==="third") newBases.third={name:r.name,fast:false};
+        // "scored" = removed
+      });
+      // Place batter
+      const bn=currentBatter?.name||"Batter";
+      if(hitType==="single"&&!newBases.first) newBases.first={name:bn,fast:false};
+      else if(hitType==="double"&&!newBases.second) newBases.second={name:bn,fast:false};
+      else if(hitType==="triple"&&!newBases.third) newBases.third={name:bn,fast:false};
+      onUpdateBases(newBases);
+      setRunnersToResolve([]);
+      setResolvedRunners([]);
+      setRunnerResolutionIdx(0);
+      setHitType(null);
+      setShowOutConfirm(true);
+    } else {
+      setResolvedRunners(next);
+      setRunnerResolutionIdx(i=>i+1);
+    }
+  };
+
+  const handleContactResult=(resultId)=>{
+    if(!contactPending) return;
+    if(resultId==="out"){
+      const label=`${contactPending.label} — Out`;
+      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:label,outcomeId:contactPending.id,isPositive:true,isOut:true,onBase:false,batter:currentBatter?.name||""});
+      onAddOut();
+      setContactPending(null);
+      setSelectedZone(null);
+      setShowOutConfirm(true);
+    }
+    // "onbase" -> show hit type buttons (handled inline)
+  };
+
+  const subResults=useMemo(()=>{
+    if(subQuery.length<2) return [];
+    return MLB_BATTERS.filter(b=>b.name.toLowerCase().includes(subQuery.toLowerCase())).slice(0,5);
+  },[subQuery]);
+
+  const currentBases=session.bases||{first:null,second:null,third:null};
+  const stealThreat=activePitch?.stealThreat;
+
+  // Base diamond toggle (manual adjust)
+  const toggleBase=(b)=>{
+    const cur=currentBases[b];
+    if(cur) onUpdateBases({...currentBases,[b]:null});
+    else onUpdateBases({...currentBases,[b]:{name:"Runner",fast:false}});
+  };
+  const toggleFast=(b)=>{
+    const cur=currentBases[b];
+    if(!cur) return;
+    onUpdateBases({...currentBases,[b]:{...cur,fast:!cur.fast}});
+  };
+
+  // Runner advancement options based on hit type
+  const advanceOptions=(hitTypeId)=>{
+    if(hitTypeId==="single") return [{id:"first",label:"Stayed (1st)→1st"},{id:"second",label:"Advanced→2nd"},{id:"third",label:"Advanced→3rd"},{id:"scored",label:"Scored"}];
+    if(hitTypeId==="double") return [{id:"second",label:"Stayed→2nd"},{id:"third",label:"Advanced→3rd"},{id:"scored",label:"Scored"}];
+    if(hitTypeId==="triple") return [{id:"third",label:"Stayed→3rd"},{id:"scored",label:"Scored"}];
+    return [];
+  };
+
+  const outDots=[0,1,2].map(i=>i<outs);
+
+  return(
+    <div style={{padding:"14px 16px"}}>
+
+      {/* Batter banner */}
+      {currentBatter&&(
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+          background:C.greenDim,border:`1.5px solid ${C.greenMid}`,borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:800,color:C.greenMid,letterSpacing:"0.08em",textTransform:"uppercase"}}>At Bat</div>
+            <div style={{fontSize:14,fontWeight:800,color:C.text}}>{currentBatter.name||`Batter ${batterIdx+1}`}</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,color:C.textSoft,fontWeight:600}}>{currentBatter.bat==="S"?"Switch":currentBatter.bat==="L"?"LHB":"RHB"}</span>
+            <button onClick={()=>setShowSub(!showSub)} style={{...S.ghostBtn,padding:"4px 10px",fontSize:10}}>Sub</button>
+          </div>
+        </div>
+      )}
+
+      {/* Sub panel */}
+      {showSub&&(
+        <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:10,marginBottom:10}}>
+          <div style={{fontSize:10,fontWeight:800,color:C.textSoft,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.08em"}}>Substitution</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+            {lineup&&lineup.map((b,i)=>(
+              <button key={i} onClick={()=>setSubSlot(i)} style={{
+                padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+                background:subSlot===i?C.green:C.surface,color:subSlot===i?"#fff":C.textMid,
+                border:`1px solid ${subSlot===i?C.green:C.border}`,cursor:"pointer",
+              }}>{i+1}. {b.name||"—"}</button>
+            ))}
+          </div>
+          {subSlot!==null&&(
+            <>
+              <input value={subQuery} onChange={e=>setSubQuery(e.target.value)} placeholder="New batter name..."
+                style={{...S.input,width:"100%",boxSizing:"border-box",marginBottom:4}}/>
+              {subResults.map(b=>(
+                <div key={b.name} onClick={()=>{onSub(subSlot,b);setShowSub(false);setSubQuery("");setSubSlot(null);}} style={{
+                  padding:"8px 10px",background:C.surface,borderRadius:6,marginBottom:3,cursor:"pointer",
+                  display:"flex",justifyContent:"space-between",
+                }}>
+                  <span style={{fontWeight:700,fontSize:12}}>{b.name}</span>
+                  <span style={{fontSize:10,color:C.textSoft}}>{b.bat}H</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Count + bases bar */}
+      <div style={{...S.countBar,gap:0,alignItems:"center"}}>
+        {/* Count */}
+        <div style={{display:"flex",alignItems:"baseline",gap:5}}><span style={S.countNum}>{balls}</span><span style={S.countLabel}>B</span></div>
+        <div style={S.countDivider}/>
+        <div style={{display:"flex",alignItems:"baseline",gap:5}}><span style={S.countNum}>{strikes}</span><span style={S.countLabel}>S</span></div>
+        <div style={{flex:1}}/>
+
+        {/* Bases diamond */}
+        <div style={{position:"relative",width:52,height:52,marginRight:8}}>
+          {/* Second base (top) */}
+          <div onClick={()=>toggleBase("second")} style={{
+            position:"absolute",top:0,left:"50%",transform:"translateX(-50%) rotate(45deg)",
+            width:16,height:16,background:currentBases.second?C.gold:"#1a2e22",
+            border:`2px solid ${currentBases.second?C.gold:C.textSoft}`,cursor:"pointer",
+            boxShadow:currentBases.second?`0 0 6px ${C.gold}`:undefined,
+          }}/>
+          {/* Third base (left) */}
+          <div onClick={()=>toggleBase("third")} style={{
+            position:"absolute",top:"50%",left:0,transform:"translateY(-50%) rotate(45deg)",
+            width:16,height:16,background:currentBases.third?C.gold:"#1a2e22",
+            border:`2px solid ${currentBases.third?C.gold:C.textSoft}`,cursor:"pointer",
+            boxShadow:currentBases.third?`0 0 6px ${C.gold}`:undefined,
+          }}/>
+          {/* First base (right) */}
+          <div onClick={()=>toggleBase("first")} style={{
+            position:"absolute",top:"50%",right:0,transform:"translateY(-50%) rotate(45deg)",
+            width:16,height:16,background:currentBases.first?C.gold:"#1a2e22",
+            border:`2px solid ${currentBases.first?C.gold:C.textSoft}`,cursor:"pointer",
+            boxShadow:currentBases.first?`0 0 6px ${C.gold}`:undefined,
+          }}/>
+          {/* Home plate indicator */}
+          <div style={{position:"absolute",bottom:0,left:"50%",transform:"translateX(-50%) rotate(45deg)",
+            width:12,height:12,background:"transparent",border:`1.5px solid ${C.textSoft}`}}/>
+        </div>
+
+        {/* Outs */}
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+          <div style={{display:"flex",gap:3}}>
+            {outDots.map((filled,i)=>(
+              <div key={i} style={{width:9,height:9,borderRadius:"50%",background:filled?C.warn:C.surface,border:`1.5px solid ${filled?C.warn:C.border}`}}/>
+            ))}
+          </div>
+          <span style={{fontSize:9,color:C.textSoft,fontWeight:700}}>OUTS</span>
+        </div>
+      </div>
+
+      {/* Fast runner toggle for occupied bases */}
+      {(currentBases.first||currentBases.second)&&(
+        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+          {[["first","1st"],["second","2nd"]].map(([b,lbl])=>currentBases[b]&&(
+            <button key={b} onClick={()=>toggleFast(b)} style={{
+              padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+              background:currentBases[b].fast?"#fdf3dc":C.surface,
+              color:currentBases[b].fast?C.gold:C.textSoft,
+              border:`1.5px solid ${currentBases[b].fast?C.gold:C.border}`,cursor:"pointer",
+            }}>⚡ {lbl} fast?</button>
+          ))}
+        </div>
+      )}
+
+      {/* Steal threat notice */}
+      {stealThreat&&!showOutConfirm&&!contactPending&&!hitType&&(
+        <div style={{background:C.goldLight,border:`1.5px solid ${C.gold}`,borderRadius:8,padding:"7px 12px",marginBottom:10,fontSize:11,fontWeight:700,color:C.gold}}>
+          ⚡ Steal threat on base — stretch recommended, fastball frequency boosted
+        </div>
+      )}
+
+      {/* Strikeout/walk/advance confirm */}
+      {showOutConfirm&&(
+        <div style={{background:C.white,border:`2px solid ${C.green}`,borderRadius:10,padding:"14px 16px",marginBottom:12,textAlign:"center"}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:10}}>
+            {strikes>=3?"Strikeout ⚾":balls>=4?"Walk 🚶":"At-bat over"}
+          </div>
+          <button onClick={()=>{setShowOutConfirm(false);onNewAtBat();setBalls(0);setStrikes(0);}} style={{...S.primaryBtn,width:"auto",padding:"10px 28px",fontSize:13}}>
+            Next Batter →
+          </button>
+        </div>
+      )}
+
+      {/* Runner resolution flow */}
+      {hitType&&runnersToResolve.length>0&&runnerResolutionIdx<runnersToResolve.length&&(
+        <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+          <div style={{fontSize:11,fontWeight:800,color:C.textSoft,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.08em"}}>
+            Where is {runnersToResolve[runnerResolutionIdx].name} ({runnersToResolve[runnerResolutionIdx].base})?
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {advanceOptions(hitType).map(opt=>(
+              <button key={opt.id} onClick={()=>resolveRunner(opt.id)} style={{
+                padding:"11px",borderRadius:8,border:`1.5px solid ${C.border}`,background:C.surface,
+                color:C.text,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif",textAlign:"left",
+              }}>{opt.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Contact secondary */}
+      {contactPending&&!showOutConfirm&&!hitType&&(
+        <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+          <div style={{fontSize:11,fontWeight:800,color:C.textSoft,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.08em"}}>
+            {contactPending.label} — result?
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <button onClick={()=>handleContactResult("out")} style={{
+              padding:"13px",borderRadius:9,border:`1.5px solid ${C.green}`,background:C.greenLight,
+              color:C.green,fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+            }}>Out ✓</button>
+            <button onClick={()=>setHitType("__pick")} style={{
+              padding:"13px",borderRadius:9,border:`1.5px solid ${C.warn}`,background:C.warnLight,
+              color:C.warn,fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+            }}>Hit →</button>
+          </div>
+          {hitType==="__pick"&&(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+              {[["single","Single"],["double","Double"],["triple","Triple"],["hr","Home Run 🏠"]].map(([id,lbl])=>(
+                <button key={id} onClick={()=>{setHitType(null);startHitFlow(contactPending,id);}} style={{
+                  padding:"10px",borderRadius:8,border:`1.5px solid ${C.border}`,background:C.surface,
+                  color:C.text,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+                }}>{lbl}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recommendation box -- driven by activePitch */}
+      {activePitch&&!showOutConfirm&&!contactPending&&(
+        <div style={S.recBox}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={S.recLabel}>Throw This</div>
+              <div style={S.recPitch}>{activePitch.type}</div>
+              <div style={S.recVelo}>{activePitch.velo} mph</div>
+            </div>
+            <div style={{...S.scoreCircle,borderColor:scoreColor(activePitch.score),color:scoreColor(activePitch.score)}}>{activePitch.score}</div>
+          </div>
+          <div style={S.recReason}>
+            {isChaseRec&&<span style={{color:C.blue,fontWeight:700}}>🎯 Chase pitch — </span>}
+            {getFullReason(lastThrown,lastZone,activePitch.type,recZone,activePitch.score)}
+          </div>
+        </div>
+      )}
+
+      {!showOutConfirm&&!contactPending&&(<>
+        {/* Pitch selector */}
+        <div style={{marginBottom:12}}>
+          <div style={S.sectionLabel}>Select Pitch</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+            {scored.map(p=>(
+              <button key={p.type} onClick={()=>setSelectedPitch(p.type)} style={{
+                padding:"7px 11px",borderRadius:7,fontFamily:"'Nunito',sans-serif",
+                border:`1.5px solid ${selectedPitch===p.type?C.greenMid:C.border}`,
+                background:selectedPitch===p.type?C.greenDim:C.white,
+                color:selectedPitch===p.type?C.green:C.textMid,
+                fontSize:12,fontWeight:700,cursor:"pointer",
+              }}>
+                {p.type} <span style={{fontWeight:500,fontSize:10,opacity:0.7}}>{p.score}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Zone grid */}
+        <div style={{marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={S.sectionLabel}>Location 🔵=target</div>
+            {selectedZone&&<span style={{fontSize:11,color:C.green,fontWeight:700}}>🟢 {zoneLabel(selectedZone)}</span>}
+          </div>
+          <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:10}}>
+            <ZoneGrid onSelect={setSelectedZone} selected={selectedZone} recommended={recZone}/>
+            {!selectedZone&&<div style={{color:C.textSoft,fontSize:11,textAlign:"center",marginTop:6,fontWeight:500}}>Tap where you threw it</div>}
+          </div>
+        </div>
+
+        {/* Outcome buttons */}
+        <div>
+          <div style={S.sectionLabel}>
+            Outcome {!selectedZone&&<span style={{color:C.warn,fontWeight:600}}>— tap zone first</span>}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+            {OUTCOMES.map(oc=>(
+              <button key={oc.id} onClick={()=>handleOutcome(oc)} disabled={!selectedZone} style={{
+                padding:"12px 6px",borderRadius:9,fontFamily:"'Nunito',sans-serif",
+                background:!selectedZone?"#f0ede7":C.white,
+                border:`1.5px solid ${!selectedZone?C.border:oc.color}`,
+                color:!selectedZone?C.textSoft:oc.color,
+                fontSize:12,fontWeight:800,cursor:selectedZone?"pointer":"not-allowed",
+                opacity:!selectedZone?0.5:1,transition:"all 0.1s",
+              }}>{oc.label}</button>
+            ))}
+          </div>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+// ─── Visuals Tab ──────────────────────────────────────────────────────────────
+function VisualsTab({session}){
+  const{pitches,gameLog,pitcherHand}=session;
+  const[selectedZoneInfo,setSelectedZoneInfo]=useState(null);
+  const dotColors=[C.green,"#b5811b","#b5451b","#5b8dd9","#7c5cbf","#d97c2d","#2d9bb5"];
+
+  // Movement chart: map pitch movement to SVG coords on a labeled grid
+  // Grid: x=horizontal break (-20 to +20 in), y=vertical break (-15 to +20 in)
+  const GRID={xMin:-22,xMax:22,yMin:-16,yMax:22,w:160,h:140,pad:20};
+  const toSvg=(h,v)=>({
+    x: GRID.pad + ((h-GRID.xMin)/(GRID.xMax-GRID.xMin))*(GRID.w-2*GRID.pad),
+    y: GRID.h-GRID.pad - ((v-GRID.yMin)/(GRID.yMax-GRID.yMin))*(GRID.h-2*GRID.pad),
+  });
+  const origin=toSvg(0,0);
+  const xTicks=[-20,-10,0,10,20];
+  const yTicks=[-10,0,10,20];
+
+  // Zone heatmap data
+  const zoneData={};
+  gameLog.forEach(e=>{
+    if(!e.zone) return;
+    if(!zoneData[e.zone]) zoneData[e.zone]={pitches:[],outs:0,onBase:0,fouls:0,balls:0,total:0};
+    zoneData[e.zone].pitches.push(e);
+    zoneData[e.zone].total++;
+    if(e.isOut) zoneData[e.zone].outs++;
+    else if(e.onBase) zoneData[e.zone].onBase++;
+    else if(e.outcomeId==="foul") zoneData[e.zone].fouls++;
+    else if(e.outcomeId==="ball") zoneData[e.zone].balls++;
+  });
+
+  // Zone color: red = pitcher favoring (low opp average), blue = batter favoring (high opp hits)
+  const zoneColor=(id)=>{
+    const d=zoneData[id]; if(!d||d.total<1) return null;
+    // Opponent "average" = on base events / contact events (hard+weak)
+    const contact=d.pitches.filter(p=>["hard","weak"].includes(p.outcomeId)).length;
+    if(contact===0) return null;
+    const avg=d.onBase/contact; // 0=all outs, 1=all on base
+    if(avg<=0.25) return `rgba(180,30,30,${0.15+avg*0.5})`; // red = good zone
+    if(avg>=0.6)  return `rgba(26,111,181,${0.15+avg*0.4})`; // blue = bad zone
+    return `rgba(181,129,27,${0.2})`; // gold = neutral
+  };
+
+  return(
+    <div style={{padding:"16px"}}>
+      {/* Movement chart */}
+      <div style={S.sectionLabel}>Pitch Movement Profile</div>
+      <div style={{...S.card,marginBottom:16,overflowX:"auto"}}>
+        <svg viewBox={`0 0 ${GRID.w} ${GRID.h}`} style={{width:"100%",height:180}}>
+          {/* Grid lines */}
+          {xTicks.map(x=>{const p=toSvg(x,0);return(<g key={x}>
+            <line x1={p.x} y1={GRID.pad} x2={p.x} y2={GRID.h-GRID.pad} stroke={x===0?"#b0b0b0":C.border} strokeWidth={x===0?0.8:0.4} strokeDasharray={x===0?"none":"2,2"}/>
+            <text x={p.x} y={GRID.h-GRID.pad+7} fontSize={4} fill={C.textSoft} textAnchor="middle" fontFamily="Nunito,sans-serif">{x}</text>
+          </g>);})}
+          {yTicks.map(y=>{const p=toSvg(0,y);return(<g key={y}>
+            <line x1={GRID.pad} y1={p.y} x2={GRID.w-GRID.pad} y2={p.y} stroke={y===0?"#b0b0b0":C.border} strokeWidth={y===0?0.8:0.4} strokeDasharray={y===0?"none":"2,2"}/>
+            <text x={GRID.pad-2} y={p.y+1.5} fontSize={4} fill={C.textSoft} textAnchor="end" fontFamily="Nunito,sans-serif">{y}</text>
+          </g>);})}
+          {/* Axis labels */}
+          <text x={GRID.w/2} y={GRID.h-1} fontSize={4.5} fill={C.textMid} textAnchor="middle" fontFamily="Nunito,sans-serif" fontWeight="700">Horizontal Break (in)</text>
+          <text x={3} y={GRID.h/2} fontSize={4.5} fill={C.textMid} textAnchor="middle" fontFamily="Nunito,sans-serif" fontWeight="700" transform={`rotate(-90,3,${GRID.h/2})`}>Vertical (in)</text>
+          {/* Origin cross */}
+          <circle cx={origin.x} cy={origin.y} r={1.5} fill={C.border}/>
+          {/* Pitch dots */}
+          {pitches.map((p,i)=>{
+            const m=getMovement(p.type,p.velo,pitcherHand);
+            const{x,y}=toSvg(m.h,m.v);
+            const cx2=Math.min(GRID.w-GRID.pad-2,Math.max(GRID.pad+2,x));
+            const cy2=Math.min(GRID.h-GRID.pad-2,Math.max(GRID.pad+2,y));
+            const col=dotColors[i%dotColors.length];
+            return(<g key={p.type}>
+              <circle cx={cx2} cy={cy2} r={5} fill={col} opacity={0.9}/>
+              <text x={cx2+7} y={cy2+1.5} fontSize={4.2} fill={col} fontFamily="Nunito,sans-serif" fontWeight="700">{p.type.split(" ")[0]}</text>
+            </g>);
+          })}
+        </svg>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:4}}>
+          {pitches.map((p,i)=>(<div key={p.type} style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:9,height:9,borderRadius:"50%",background:dotColors[i%dotColors.length]}}/>
+            <span style={{color:C.textMid,fontSize:11,fontWeight:600}}>{p.type} ({p.velo})</span>
+          </div>))}
+        </div>
+      </div>
+
+      {/* Heatmap */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={S.sectionLabel}>Zone Heatmap <span style={{fontWeight:500,color:C.textSoft}}>({gameLog.length} pitches)</span></div>
+        <div style={{display:"flex",gap:8,fontSize:10,fontWeight:700}}>
+          <span style={{color:"rgba(180,30,30,0.9)"}}>🔴 Pound it</span>
+          <span style={{color:C.blue}}>🔵 Avoid</span>
+        </div>
+      </div>
+      <div style={S.card}>
+        {gameLog.length===0?(
+          <div style={{color:C.textSoft,fontSize:12,textAlign:"center",padding:20,fontWeight:500}}>No pitches logged yet</div>
+        ):(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3}}>
+            {Array.from({length:25},(_,idx)=>{
+              const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
+              const d=zoneData[id],inZone=row>=1&&row<=3&&col>=1&&col<=3;
+              const bg=zoneColor(id)||(inZone?C.white:C.surface);
+              return(
+                <div key={id} onClick={()=>setSelectedZoneInfo(selectedZoneInfo===id?null:id)} style={{
+                  height:44,borderRadius:6,cursor:d?"pointer":"default",
+                  background:bg,border:`1.5px solid ${selectedZoneInfo===id?C.text:C.border}`,
+                  display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",
+                }}>
+                  {d&&<span style={{fontSize:10,fontWeight:800,color:C.text}}>{d.total}</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {/* Zone drill-down */}
+        {selectedZoneInfo&&zoneData[selectedZoneInfo]&&(()=>{
+          const d=zoneData[selectedZoneInfo];
+          return(
+            <div style={{marginTop:10,padding:"10px 12px",background:C.surface,borderRadius:8}}>
+              <div style={{fontWeight:800,fontSize:12,color:C.text,marginBottom:6}}>{zoneLabel(selectedZoneInfo)} — {d.total} pitch{d.total!==1?"es":""}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginBottom:8}}>
+                {[["Outs",d.outs,C.green],["On Base",d.onBase,C.warn],["Fouls",d.fouls,C.gold],["Balls",d.balls,C.textSoft]].map(([lbl,val,col])=>(
+                  <div key={lbl} style={{background:C.white,borderRadius:6,padding:"6px 10px",display:"flex",justifyContent:"space-between"}}>
+                    <span style={{fontSize:11,color:C.textSoft,fontWeight:600}}>{lbl}</span>
+                    <span style={{fontSize:12,fontWeight:800,color:col}}>{val}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:10,color:C.textSoft,fontWeight:600,marginBottom:4}}>Pitches thrown here:</div>
+              {d.pitches.map((e,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderTop:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:11,fontWeight:700,color:C.text}}>{e.pitch}</span>
+                  <span style={{fontSize:11,color:e.isOut?C.green:e.onBase?C.warn:C.textSoft,fontWeight:600}}>{e.outcome}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
+// ─── Log Tab ──────────────────────────────────────────────────────────────────
+function LogTab({session}){
+  const{gameLog}=session;
+  return(
+    <div style={{padding:"16px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={S.sectionLabel}>Game Log</div>
+        <span style={{fontSize:11,color:C.textSoft,fontWeight:700}}>{gameLog.length} pitches</span>
+      </div>
+      {gameLog.length===0?(
+        <div style={{color:C.textSoft,fontSize:13,textAlign:"center",padding:48,fontWeight:500}}>No pitches logged yet.</div>
+      ):(
+        [...gameLog].reverse().map((s,i)=>{
+          const isGood=OUT_IDS.includes(s.outcomeId),isOk=POSITIVE_IDS.includes(s.outcomeId)&&!isGood;
+          const dot=isGood?C.green:isOk?C.gold:C.warn;
+          return(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 12px",
+              background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,marginBottom:4}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:dot,flexShrink:0}}/>
+              <span style={{color:C.textSoft,fontSize:10,fontWeight:700,width:22}}>#{gameLog.length-i}</span>
+              <span style={{flex:1,color:C.text,fontSize:12,fontWeight:700}}>{s.pitch}</span>
+              {s.batter&&<span style={{fontSize:10,color:C.textSoft,fontWeight:600,maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.batter.split(" ").pop()}</span>}
+              <span style={{color:C.textSoft,fontSize:10,fontWeight:600,marginRight:2}}>{s.zone||"--"}</span>
+              <span style={{fontSize:10,fontWeight:700,color:dot,textAlign:"right",maxWidth:100}}>{s.outcome}</span>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+export default function App(){
+  const[tab,setTab]=useState("setup");
+  const[session,setSession]=useState(null);
+  const[showScorePrompt,setShowScorePrompt]=useState(false);
+  const[scoreInput,setScoreInput]=useState({my:0,opp:0});
+
+  const handleSetup=(config)=>{
+    setSession({...config,sequence:[],outcomes:{},gameLog:[],batterIdx:0,outs:0,inning:1,myScore:0,oppScore:0,inningLog:[],bases:{first:null,second:null,third:null}});
+    setTab("atbat");
+  };
+
+  const handleLogPitch=useCallback((entry)=>{
+    setSession(prev=>{
+      const no={...prev.outcomes};
+      if(entry.isPositive){
+        no[entry.pitch]=(no[entry.pitch]||0)+3;
+        if(prev.sequence.length>0){const p2=prev.sequence[prev.sequence.length-1].pitch;no[p2]=(no[p2]||0)+1;}
+      }
+      return{...prev,sequence:[...prev.sequence,entry],gameLog:[...prev.gameLog,entry],outcomes:no};
+    });
+  },[]);
+
+  const handleUpdateBases=useCallback((newBases)=>{
+    setSession(prev=>({...prev,bases:newBases}));
+  },[]);
+
+  const handleAddOut=useCallback(()=>{
+    setSession(prev=>{
+      const newOuts=prev.outs+1;
+      if(newOuts>=3){
+        setShowScorePrompt(true);
+        setScoreInput({my:0,opp:0});
+        return{...prev,outs:0,inning:prev.inning+1,bases:{first:null,second:null,third:null}};
+      }
+      return{...prev,outs:newOuts};
+    });
+  },[]);
+
+  const handleScoreSubmit=()=>{
+    setSession(prev=>({
+      ...prev,
+      myScore:prev.myScore+scoreInput.my,
+      oppScore:prev.oppScore+scoreInput.opp,
+      inningLog:[...prev.inningLog,{inning:prev.inning-1,my:scoreInput.my,opp:scoreInput.opp}],
+    }));
+    setShowScorePrompt(false);
+  };
+
+  const handleNewAtBat=useCallback(()=>{
+    setSession(prev=>{
+      const validBatters=prev.lineup?prev.lineup.filter(b=>b.name):[];
+      const nextIdx=validBatters.length>0?((prev.batterIdx+1)%validBatters.length):0;
+      return{...prev,sequence:[],batterIdx:nextIdx};
+    });
+  },[]);
+
+  const handleSub=(slot,newBatter)=>setSession(prev=>{
+    if(!prev.lineup) return prev;
+    const nl=[...prev.lineup];
+    nl[slot]={name:newBatter.name,bat:newBatter.bat,custom:false};
+    return{...prev,lineup:nl};
+  });
+
+  const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
+  const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"}];
+
+  return(
+    <>
+      <style>{FONT_IMPORT}</style>
+      <div style={S.root}>
+        <div style={S.header}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:20}}>⚾</span>
+              <div style={S.headerTitle}>Pitch IQ</div>
+            </div>
+            {session?(
+              <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                {/* Score */}
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"}}>Score</div>
+                  <div style={{fontSize:15,fontWeight:800,color:"#fff",lineHeight:1}}>{session.myScore}–{session.oppScore}</div>
+                </div>
+                <div style={{width:1,height:28,background:"rgba(255,255,255,0.2)"}}/>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"}}>Inn</div>
+                  <div style={{fontSize:15,fontWeight:800,color:"#fff",lineHeight:1}}>{ordinal(session.inning)}</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"}}>Outs</div>
+                  <div style={{display:"flex",gap:3,marginTop:3,justifyContent:"center"}}>
+                    {[0,1,2].map(i=>(<div key={i} style={{width:9,height:9,borderRadius:"50%",background:i<session.outs?"#fff":"rgba(255,255,255,0.25)",border:"1.5px solid rgba(255,255,255,0.4)"}}/>))}
+                  </div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"}}>P</div>
+                  <div style={{fontSize:15,fontWeight:800,color:"#fff",lineHeight:1}}>{session.gameLog?.length||0}</div>
+                </div>
+              </div>
+            ):<div/>}
+          </div>
+        </div>
+
+        {/* Half-inning score prompt */}
+        {showScorePrompt&&(
+          <div style={{background:C.white,borderBottom:`2px solid ${C.border}`,padding:"12px 16px"}}>
+            <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:8}}>Half-inning over — runs scored?</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+              {[["My runs (while batting)",scoreInput.my,"my"],["Opp runs (while I pitched)",scoreInput.opp,"opp"]].map(([lbl,val,key])=>(
+                <div key={key}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.06em"}}>{lbl}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <button onClick={()=>setScoreInput(s=>({...s,[key]:Math.max(0,s[key]-1)}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>−</button>
+                    <span style={{fontSize:18,fontWeight:800,color:C.text,minWidth:24,textAlign:"center"}}>{val}</span>
+                    <button onClick={()=>setScoreInput(s=>({...s,[key]:s[key]+1}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>+</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={handleScoreSubmit} style={{...S.primaryBtn}}>Continue →</button>
+          </div>
+        )}
+
+        <div style={S.tabBar}>
+          {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={tab===t.id?S.tabOn:S.tabOff}>{t.label}</button>))}
+        </div>
+        <div style={S.content}>
+          {tab==="setup"&&<SetupTab onComplete={handleSetup}/>}
+          {tab==="atbat"&&(session
+            ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut}/>
+            :<div style={S.emptyState}>Complete setup first.</div>
+          )}
+          {tab==="visuals"&&(session?<VisualsTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
+          {tab==="log"&&(session?<LogTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
+        </div>
+      </div>
+    </>
+  );
+}
+
+const S={
+  root:{background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",fontFamily:"'Nunito',sans-serif",color:C.text},
+  header:{padding:"16px",background:C.green},
+  headerTitle:{fontSize:18,fontWeight:800,color:"#fff"},
+  headerSub:{fontSize:11,color:"rgba(255,255,255,0.6)",fontWeight:500,marginTop:1},
+  tabBar:{display:"flex",background:C.white,borderBottom:`2px solid ${C.border}`},
+  tabOn:{flex:1,padding:"11px 0",fontSize:12,fontWeight:800,fontFamily:"'Nunito',sans-serif",background:"none",border:"none",borderBottom:`3px solid ${C.green}`,color:C.green,cursor:"pointer",marginBottom:-2},
+  tabOff:{flex:1,padding:"11px 0",fontSize:12,fontWeight:600,fontFamily:"'Nunito',sans-serif",background:"none",border:"none",borderBottom:"3px solid transparent",color:C.textSoft,cursor:"pointer",marginBottom:-2},
+  content:{overflowY:"auto"},
+  label:{fontSize:11,fontWeight:700,color:C.textSoft,letterSpacing:"0.04em",marginBottom:8,textTransform:"uppercase"},
+  sectionLabel:{fontSize:10,fontWeight:800,color:C.textSoft,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8},
+  input:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Nunito',sans-serif",fontWeight:600,outline:"none"},
+  toggleOn:{padding:"9px 22px",background:C.green,color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  toggleOff:{padding:"9px 22px",background:C.white,color:C.textMid,border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  pitchRow:{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"9px 12px",marginBottom:6},
+  select:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:7,padding:"8px 10px",fontSize:13,fontFamily:"'Nunito',sans-serif",fontWeight:600,outline:"none"},
+  veloInput:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:7,padding:"7px 8px",fontSize:13,width:52,fontFamily:"'Nunito',sans-serif",fontWeight:700,textAlign:"center",outline:"none"},
+  removeBtn:{background:"none",border:"none",color:C.textSoft,cursor:"pointer",fontSize:13,padding:"2px 4px",fontFamily:"'Nunito',sans-serif"},
+  ghostBtn:{background:"none",border:`1.5px solid ${C.greenMid}`,color:C.greenMid,borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  primaryBtn:{width:"100%",padding:"14px",background:C.green,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  secondaryBtn:{width:"100%",padding:"12px",background:C.white,color:C.textMid,border:`1.5px solid ${C.border}`,borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  countBar:{display:"flex",alignItems:"center",background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 16px",marginBottom:12},
+  countNum:{fontSize:30,fontWeight:800,color:C.text,lineHeight:1},
+  countLabel:{fontSize:13,fontWeight:600,color:C.textSoft},
+  countDivider:{width:1,height:30,background:C.border,margin:"0 16px"},
+  countBadge:{background:C.greenLight,color:C.green,padding:"4px 12px",borderRadius:20,fontSize:12,fontWeight:700},
+  recBox:{background:C.greenLight,border:`1.5px solid ${C.greenMid}`,borderRadius:10,padding:"12px 16px",marginBottom:12},
+  recLabel:{fontSize:10,fontWeight:800,color:C.greenMid,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:3},
+  recPitch:{fontSize:22,fontWeight:800,color:C.text,lineHeight:1.1},
+  recVelo:{fontSize:12,color:C.textMid,fontWeight:600,marginTop:2},
+  recReason:{fontSize:12,color:C.textMid,marginTop:8,lineHeight:1.5,fontWeight:500,borderTop:`1px solid rgba(45,106,79,0.2)`,paddingTop:8},
+  scoreCircle:{width:44,height:44,borderRadius:"50%",border:"2.5px solid",background:C.white,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800},
+  card:{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:12},
+  emptyState:{color:C.textSoft,fontSize:13,textAlign:"center",padding:48,fontWeight:500},
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
