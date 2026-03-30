@@ -1653,6 +1653,13 @@ const S={
   countBadge:{background:C.greenLight,color:C.green,padding:"4px 12px",borderRadius:20,fontSize:12,fontWeight:700},
   recBox:{background:C.greenLight,border:`1.5px solid ${C.greenMid}`,borderRadius:10,padding:"12px 16px",marginBottom:12},
   recLabel:{fontSize:10,fontWeight:800,color:C.greenMid,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:3},
+  recPitch:{fontSize:22,fontWeight:800,color:C.text,lineHeight:1.1},
+  recVelo:{fontSize:12,color:C.textMid,fontWeight:600,marginTop:2},
+  recReason:{fontSize:12,color:C.textMid,marginTop:8,lineHeight:1.5,fontWeight:500,borderTop:`1px solid rgba(45,106,79,0.2)`,paddingTop:8},
+  scoreCircle:{width:44,height:44,borderRadius:"50%",border:"2.5px solid",background:C.white,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800},
+  card:{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:12},
+  emptyState:{color:C.textSoft,fontSize:13,textAlign:"center",padding:48,fontWeight:500},
+};
 
 function HistoryTab() {
   const [games,setGames]=useState([]);
@@ -1770,20 +1777,16 @@ function App(){
   const [scoreInput,setScoreInput]=useState({my:0,opp:0});
   const [saving,setSaving]=useState(false);
   const [savedId,setSavedId]=useState(null);
-
   const handleSetup=(config)=>{
     setSession({...config,sequence:[],outcomes:{},gameLog:[],batterIdx:0,
-      outs:0,inning:1,myScore:0,oppScore:0,inningLog:[],
-      bases:{first:null,second:null,third:null}});
+      outs:0,inning:1,myScore:0,oppScore:0,inningLog:[],bases:{first:null,second:null,third:null}});
     setTab("atbat");setSavedId(null);
   };
   const handleLogPitch=useCallback((entry)=>{
     setSession(prev=>{
       const no={...prev.outcomes};
-      if(entry.isPositive){
-        no[entry.pitch]=(no[entry.pitch]||0)+3;
-        if(prev.sequence.length>0){const p2=prev.sequence[prev.sequence.length-1].pitch;no[p2]=(no[p2]||0)+1;}
-      }
+      if(entry.isPositive){no[entry.pitch]=(no[entry.pitch]||0)+3;
+        if(prev.sequence.length>0){const p2=prev.sequence[prev.sequence.length-1].pitch;no[p2]=(no[p2]||0)+1;}}
       return{...prev,sequence:[...prev.sequence,entry],gameLog:[...prev.gameLog,entry],outcomes:no};
     });
   },[]);
@@ -1808,8 +1811,7 @@ function App(){
   },[]);
   const handleSub=(slot,nb)=>setSession(prev=>{
     if(!prev.lineup) return prev;
-    const nl=[...prev.lineup];nl[slot]={name:nb.name,bat:nb.bat,custom:false};
-    return{...prev,lineup:nl};
+    const nl=[...prev.lineup];nl[slot]={name:nb.name,bat:nb.bat,custom:false};return{...prev,lineup:nl};
   });
   const handleUpdateBases=useCallback((b)=>setSession(prev=>({...prev,bases:b})),[]);
   const handleSaveGame=async()=>{
@@ -1818,7 +1820,6 @@ function App(){
   };
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
   const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"},{id:"history",label:"History"}];
-
   return(
     <div style={S.root}>
       <div style={S.header}>
@@ -1851,7 +1852,6 @@ function App(){
           </div>)}
         </div>
       </div>
-
       {showScorePrompt&&(<div style={{background:C.white,borderBottom:`2px solid ${C.border}`,padding:"12px 16px"}}>
         <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:8}}>Half-inning over — runs scored?</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
@@ -1868,11 +1868,9 @@ function App(){
         </div>
         <button onClick={handleScoreSubmit} style={{...S.primaryBtn}}>Continue →</button>
       </div>)}
-
       <div style={S.tabBar}>
         {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={tab===t.id?S.tabOn:S.tabOff}>{t.label}</button>))}
       </div>
-
       <div style={S.content}>
         {tab==="setup"&&<SetupTab onComplete={handleSetup}/>}
         {tab==="atbat"&&(session
