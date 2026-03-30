@@ -1623,6 +1623,12 @@ function LogTab({session}){
               <span style={{fontSize:10,fontWeight:700,color:dot,textAlign:"right",maxWidth:100}}>{s.outcome}</span>
             </div>
           );
+        })
+      )}
+    </div>
+  );
+}
+
           {tab==="log"&&(session?<LogTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
         </div>
       </div>
@@ -1666,23 +1672,19 @@ function HistoryTab() {
   const [statsView,setStatsView]=useState(null);
   const [statsData,setStatsData]=useState([]);
   const [statsLoading,setStatsLoading]=useState(false);
-
   useEffect(()=>{loadGames(30).then(g=>{setGames(g);setLoading(false);});},[]);
-
-  const loadStats=async(type,name)=>{
+  const doLoadStats=async(type,name)=>{
     setStatsLoading(true);setStatsView({type,name});
-    const data=type==="pitcher"?await loadPitcherStats(name):await loadBatterTendencies(name);
-    setStatsData(data);setStatsLoading(false);
+    const d=type==="pitcher"?await loadPitcherStats(name):await loadBatterTendencies(name);
+    setStatsData(d);setStatsLoading(false);
   };
-
   if(statsView){
     const pc={},zc={},op={};
     statsData.forEach(p=>{
       pc[p.pitch_type]=(pc[p.pitch_type]||0)+1;
       if(p.zone) zc[p.zone]=(zc[p.zone]||0)+1;
       if(!op[p.pitch_type]) op[p.pitch_type]={outs:0,total:0};
-      op[p.pitch_type].total++;
-      if(p.is_out) op[p.pitch_type].outs++;
+      op[p.pitch_type].total++;if(p.is_out) op[p.pitch_type].outs++;
     });
     const sp=Object.entries(pc).sort((a,b)=>b[1]-a[1]);
     const mz=Math.max(1,...Object.values(zc));
@@ -1692,12 +1694,11 @@ function HistoryTab() {
         <div><div style={S.sectionLabel}>{statsView.type==="pitcher"?"Pitcher Stats":"Batter Tendencies"}</div>
           <div style={{fontSize:14,fontWeight:800,color:C.text}}>{statsView.name}</div></div>
       </div>
-      {statsLoading?<div style={S.emptyState}>Loading...</div>:statsData.length===0?<div style={S.emptyState}>No data found.</div>:(<>
-        <div style={S.sectionLabel}>Pitch Usage ({statsData.length} pitches)</div>
+      {statsLoading?<div style={S.emptyState}>Loading...</div>:statsData.length===0?<div style={S.emptyState}>No data.</div>:(<>
+        <div style={S.sectionLabel}>Pitch Usage ({statsData.length})</div>
         <div style={{...S.card,marginBottom:16}}>
           {sp.map(([type,count])=>{
-            const o=op[type]||{};
-            const pct=o.total>0?Math.round((o.outs/o.total)*100):0;
+            const o=op[type]||{};const pct=o.total>0?Math.round((o.outs/o.total)*100):0;
             return(<div key={type} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
               <span style={{flex:1,fontSize:13,fontWeight:700,color:C.text}}>{type}</span>
               <span style={{fontSize:11,color:C.textSoft,width:36,textAlign:"right"}}>{count}x</span>
@@ -1712,8 +1713,8 @@ function HistoryTab() {
         <div style={S.card}>
           <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3}}>
             {Array.from({length:25},(_,idx)=>{
-              const r=Math.floor(idx/5),c2=idx%5,id=`${r}-${c2}`;
-              const cnt=zc[id]||0,intens=cnt/mz,inZ=r>=1&&r<=3&&c2>=1&&c2<=3;
+              const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
+              const cnt=zc[id]||0,intens=cnt/mz,inZ=row>=1&&row<=3&&col>=1&&col<=3;
               return(<div key={id} style={{height:40,borderRadius:5,
                 background:cnt>0?`rgba(45,106,79,${0.12+intens*0.75})`:inZ?C.white:C.surface,
                 border:`1.5px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -1725,18 +1726,16 @@ function HistoryTab() {
       </>)}
     </div>);
   }
-
   if(selected){
-    const g=games.find(x=>x.id===selected);
-    if(!g) return null;
+    const g=games.find(x=>x.id===selected);if(!g) return null;
     const log=g.game_log||[];
     return(<div style={{padding:"16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
         <button onClick={()=>setSelected(null)} style={{...S.ghostBtn,padding:"4px 10px"}}>← Back</button>
         <div><div style={{fontSize:14,fontWeight:800,color:C.text}}>{g.pitcher_name}</div>
-          <div style={{fontSize:11,color:C.textSoft}}>{new Date(g.created_at).toLocaleDateString()} · {g.my_score}–{g.opp_score} · {g.total_pitches} pitches</div></div>
+          <div style={{fontSize:11,color:C.textSoft}}>{new Date(g.created_at).toLocaleDateString()} · {g.my_score}–{g.opp_score} · {g.total_pitches}p</div></div>
       </div>
-      <button onClick={()=>loadStats("pitcher",g.pitcher_name)} style={{...S.ghostBtn,marginBottom:12}}>Career Stats</button>
+      <button onClick={()=>doLoadStats("pitcher",g.pitcher_name)} style={{...S.ghostBtn,marginBottom:12}}>Career Stats</button>
       <div style={S.sectionLabel}>Pitch Log</div>
       {log.length===0?<div style={S.emptyState}>No pitches.</div>:(
         [...log].reverse().map((e,i)=>{
@@ -1753,17 +1752,15 @@ function HistoryTab() {
       )}
     </div>);
   }
-
   return(<div style={{padding:"16px"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
       <div style={S.sectionLabel}>Game History</div>
       <span style={{fontSize:11,color:C.textSoft,fontWeight:700}}>{games.length} games</span>
     </div>
-    {loading?<div style={S.emptyState}>Loading...</div>:games.length===0?(
-      <div style={S.emptyState}>No games saved yet. Finish a game and tap "Save Game" in the Log tab.</div>
-    ):(games.map(g=>(
-      <div key={g.id} onClick={()=>setSelected(g.id)} style={{background:C.white,border:`1.5px solid ${C.border}`,
-        borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
+    {loading?<div style={S.emptyState}>Loading...</div>:games.length===0?
+      <div style={S.emptyState}>No games saved yet. Finish a game and tap "Save Game" in the Log tab.</div>:
+      games.map(g=>(<div key={g.id} onClick={()=>setSelected(g.id)} style={{background:C.white,
+        border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div><div style={{fontSize:13,fontWeight:800,color:C.text}}>{g.pitcher_name}</div>
             <div style={{fontSize:11,color:C.textSoft,marginTop:2}}>{new Date(g.created_at).toLocaleDateString()} · Inn {g.innings}</div></div>
@@ -1772,8 +1769,8 @@ function HistoryTab() {
             <div style={{fontSize:10,color:C.textSoft}}>{g.total_pitches} pitches</div>
           </div>
         </div>
-      </div>
-    )))}
+      </div>))
+    }
   </div>);
 }
 
@@ -1791,7 +1788,6 @@ function App(){
       bases:{first:null,second:null,third:null}});
     setTab("atbat");setSavedId(null);
   };
-
   const handleLogPitch=useCallback((entry)=>{
     setSession(prev=>{
       const no={...prev.outcomes};
@@ -1802,7 +1798,6 @@ function App(){
       return{...prev,sequence:[...prev.sequence,entry],gameLog:[...prev.gameLog,entry],outcomes:no};
     });
   },[]);
-
   const handleAddOut=useCallback(()=>{
     setSession(prev=>{
       const n=prev.outs+1;
@@ -1811,110 +1806,111 @@ function App(){
       return{...prev,outs:n};
     });
   },[]);
-
   const handleScoreSubmit=()=>{
     setSession(prev=>({...prev,myScore:prev.myScore+scoreInput.my,oppScore:prev.oppScore+scoreInput.opp,
       inningLog:[...prev.inningLog,{inning:prev.inning-1,my:scoreInput.my,opp:scoreInput.opp}]}));
     setShowScorePrompt(false);
   };
-
   const handleNewAtBat=useCallback(()=>{
     setSession(prev=>{
       const v=prev.lineup?prev.lineup.filter(b=>b.name):[];
       return{...prev,sequence:[],batterIdx:v.length>0?(prev.batterIdx+1)%v.length:0};
     });
   },[]);
-
   const handleSub=(slot,nb)=>setSession(prev=>{
     if(!prev.lineup) return prev;
     const nl=[...prev.lineup];nl[slot]={name:nb.name,bat:nb.bat,custom:false};
     return{...prev,lineup:nl};
   });
-
   const handleUpdateBases=useCallback((b)=>setSession(prev=>({...prev,bases:b})),[]);
-
   const handleSaveGame=async()=>{
     if(!session||saving) return;
-    setSaving(true);
-    const id=await saveGame(session);
-    setSaving(false);
-    if(id) setSavedId(id);
+    setSaving(true);const id=await saveGame(session);setSaving(false);if(id) setSavedId(id);
   };
-
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
   const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"},{id:"history",label:"History"}];
 
-  return(<div style={S.root}>
-    <div style={S.header}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:20}}>⚾</span>
-          <div style={S.headerTitle}>Pitch IQ</div>
-        </div>
-        {session&&(<div style={{display:"flex",gap:10,alignItems:"center"}}>
-          <div style={{textAlign:"center"}}>
-            <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Score</div>
-            <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.myScore}–{session.oppScore}</div>
+  return(
+    <div style={S.root}>
+      <div style={S.header}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:20}}>⚾</span>
+            <div style={S.headerTitle}>Pitch IQ</div>
           </div>
-          <div style={{width:1,height:24,background:"rgba(255,255,255,0.2)"}}/>
-          <div style={{textAlign:"center"}}>
-            <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Inn</div>
-            <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{ordinal(session.inning)}</div>
-          </div>
-          <div style={{textAlign:"center"}}>
-            <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Outs</div>
-            <div style={{display:"flex",gap:3,marginTop:2,justifyContent:"center"}}>
-              {[0,1,2].map(i=>(<div key={i} style={{width:8,height:8,borderRadius:"50%",background:i<session.outs?"#fff":"rgba(255,255,255,0.25)",border:"1px solid rgba(255,255,255,0.4)"}}/>))}
+          {session&&(
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Score</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.myScore}–{session.oppScore}</div>
+              </div>
+              <div style={{width:1,height:24,background:"rgba(255,255,255,0.2)"}}/>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Inn</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{ordinal(session.inning)}</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Outs</div>
+                <div style={{display:"flex",gap:3,marginTop:2,justifyContent:"center"}}>
+                  {[0,1,2].map(i=>(<div key={i} style={{width:8,height:8,borderRadius:"50%",
+                    background:i<session.outs?"#fff":"rgba(255,255,255,0.25)",border:"1px solid rgba(255,255,255,0.4)"}}/>))}
+                </div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>P</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.gameLog?.length||0}</div>
+              </div>
             </div>
-          </div>
-          <div style={{textAlign:"center"}}>
-            <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>P</div>
-            <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.gameLog?.length||0}</div>
-          </div>
-        </div>)}
-      </div>
-    </div>
-
-    {showScorePrompt&&(<div style={{background:C.white,borderBottom:`2px solid ${C.border}`,padding:"12px 16px"}}>
-      <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:8}}>Half-inning over — runs scored?</div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-        {[["My runs",scoreInput.my,"my"],["Opp runs",scoreInput.opp,"opp"]].map(([lbl,val,key])=>(
-          <div key={key}>
-            <div style={{fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:4,textTransform:"uppercase"}}>{lbl}</div>
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <button onClick={()=>setScoreInput(s=>({...s,[key]:Math.max(0,s[key]-1)}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>−</button>
-              <span style={{fontSize:18,fontWeight:800,color:C.text,minWidth:24,textAlign:"center"}}>{val}</span>
-              <button onClick={()=>setScoreInput(s=>({...s,[key]:s[key]+1}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>+</button>
-            </div>
-          </div>
-        ))}
-      </div>
-      <button onClick={handleScoreSubmit} style={{...S.primaryBtn}}>Continue →</button>
-    </div>)}
-
-    <div style={S.tabBar}>
-      {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={tab===t.id?S.tabOn:S.tabOff}>{t.label}</button>))}
-    </div>
-
-    <div style={S.content}>
-      {tab==="setup"&&<SetupTab onComplete={handleSetup}/>}
-      {tab==="atbat"&&(session?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases}/>:<div style={S.emptyState}>Complete setup first.</div>)}
-      {tab==="visuals"&&(session?<VisualsTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
-      {tab==="log"&&(session?
-        <div>
-          <LogTab session={session}/>
-          <div style={{padding:"0 16px 16px"}}>
-            {savedId
-              ?<div style={{textAlign:"center",padding:"12px",background:C.greenLight,borderRadius:8,color:C.green,fontWeight:700,fontSize:13}}>✓ Game saved to history</div>
-              :<button onClick={handleSaveGame} style={{...S.primaryBtn,opacity:saving?0.6:1}} disabled={saving}>{saving?"Saving...":"Save Game to History"}</button>
-            }
-          </div>
+          )}
         </div>
-        :<div style={S.emptyState}>Complete setup first.</div>
+      </div>
+
+      {showScorePrompt&&(
+        <div style={{background:C.white,borderBottom:`2px solid ${C.border}`,padding:"12px 16px"}}>
+          <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:8}}>Half-inning over — runs scored?</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+            {[["My runs",scoreInput.my,"my"],["Opp runs",scoreInput.opp,"opp"]].map(([lbl,val,key])=>(
+              <div key={key}>
+                <div style={{fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:4,textTransform:"uppercase"}}>{lbl}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <button onClick={()=>setScoreInput(s=>({...s,[key]:Math.max(0,s[key]-1)}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>−</button>
+                  <span style={{fontSize:18,fontWeight:800,color:C.text,minWidth:24,textAlign:"center"}}>{val}</span>
+                  <button onClick={()=>setScoreInput(s=>({...s,[key]:s[key]+1}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>+</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={handleScoreSubmit} style={{...S.primaryBtn}}>Continue →</button>
+        </div>
       )}
-      {tab==="history"&&<HistoryTab/>}
+
+      <div style={S.tabBar}>
+        {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={tab===t.id?S.tabOn:S.tabOff}>{t.label}</button>))}
+      </div>
+
+      <div style={S.content}>
+        {tab==="setup"&&<SetupTab onComplete={handleSetup}/>}
+        {tab==="atbat"&&(session
+          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases}/>
+          :<div style={S.emptyState}>Complete setup first.</div>
+        )}
+        {tab==="visuals"&&(session?<VisualsTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
+        {tab==="log"&&(session
+          ?<div>
+            <LogTab session={session}/>
+            <div style={{padding:"0 16px 16px"}}>
+              {savedId
+                ?<div style={{textAlign:"center",padding:"12px",background:C.greenLight,borderRadius:8,color:C.green,fontWeight:700,fontSize:13}}>✓ Game saved</div>
+                :<button onClick={handleSaveGame} style={{...S.primaryBtn,opacity:saving?0.6:1}} disabled={saving}>{saving?"Saving...":"Save Game to History"}</button>
+              }
+            </div>
+          </div>
+          :<div style={S.emptyState}>Complete setup first.</div>
+        )}
+        {tab==="history"&&<HistoryTab/>}
+      </div>
     </div>
-  </div>);
+  );
 }
 
 const root=ReactDOM.createRoot(document.getElementById('root'));
