@@ -22,7 +22,7 @@
 <script type="text/babel" data-presets="react" data-plugins="transform-modules-umd">
 const { useState, useCallback, useMemo, useEffect } = React;
 
-// ─── Supabase client ──────────────────────────────────────────────────────────
+// ─── Supabase ─────────────────────────────────────────────────────────────────
 const sb = supabase.createClient("https://giqhacohjkuskljpqzsd.supabase.co", "sb_publishable_uABrRkYvlops5IXCIR3tmA_ey5eCSWn");
 
 async function saveGame(session) {
@@ -58,7 +58,7 @@ async function saveGame(session) {
       if (pe) console.error("Save pitches error:", pe);
     }
     return game.id;
-  } catch(e) { console.error("saveGame exception:", e); return null; }
+  } catch(e) { console.error("saveGame:", e); return null; }
 }
 
 async function loadGames(limit=30) {
@@ -67,14 +67,14 @@ async function loadGames(limit=30) {
   return data || [];
 }
 
-async function loadPitcherStats(pitcherName) {
-  const { data, error } = await sb.from("pitch_log").select("*").eq("pitcher_name", pitcherName);
+async function loadPitcherStats(name) {
+  const { data, error } = await sb.from("pitch_log").select("*").eq("pitcher_name", name);
   if (error) { console.error("loadPitcherStats:", error); return []; }
   return data || [];
 }
 
-async function loadBatterTendencies(batterName) {
-  const { data, error } = await sb.from("pitch_log").select("*").eq("batter_name", batterName);
+async function loadBatterTendencies(name) {
+  const { data, error } = await sb.from("pitch_log").select("*").eq("batter_name", name);
   if (error) { console.error("loadBatterTendencies:", error); return []; }
   return data || [];
 }
@@ -1624,6 +1624,41 @@ function LogTab({session}){
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
+const S={
+  root:{background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",fontFamily:"'Nunito',sans-serif",color:C.text},
+  header:{padding:"16px",background:C.green},
+  headerTitle:{fontSize:18,fontWeight:800,color:"#fff"},
+  headerSub:{fontSize:11,color:"rgba(255,255,255,0.6)",fontWeight:500,marginTop:1},
+  tabBar:{display:"flex",background:C.white,borderBottom:`2px solid ${C.border}`},
+  tabOn:{flex:1,padding:"11px 0",fontSize:12,fontWeight:800,fontFamily:"'Nunito',sans-serif",background:"none",border:"none",borderBottom:`3px solid ${C.green}`,color:C.green,cursor:"pointer",marginBottom:-2},
+  tabOff:{flex:1,padding:"11px 0",fontSize:12,fontWeight:600,fontFamily:"'Nunito',sans-serif",background:"none",border:"none",borderBottom:"3px solid transparent",color:C.textSoft,cursor:"pointer",marginBottom:-2},
+  content:{overflowY:"auto"},
+  label:{fontSize:11,fontWeight:700,color:C.textSoft,letterSpacing:"0.04em",marginBottom:8,textTransform:"uppercase"},
+  sectionLabel:{fontSize:10,fontWeight:800,color:C.textSoft,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8},
+  input:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Nunito',sans-serif",fontWeight:600,outline:"none"},
+  toggleOn:{padding:"9px 22px",background:C.green,color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  toggleOff:{padding:"9px 22px",background:C.white,color:C.textMid,border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  pitchRow:{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"9px 12px",marginBottom:6},
+  select:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:7,padding:"8px 10px",fontSize:13,fontFamily:"'Nunito',sans-serif",fontWeight:600,outline:"none"},
+  veloInput:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:7,padding:"7px 8px",fontSize:13,width:52,fontFamily:"'Nunito',sans-serif",fontWeight:700,textAlign:"center",outline:"none"},
+  removeBtn:{background:"none",border:"none",color:C.textSoft,cursor:"pointer",fontSize:13,padding:"2px 4px",fontFamily:"'Nunito',sans-serif"},
+  ghostBtn:{background:"none",border:`1.5px solid ${C.greenMid}`,color:C.greenMid,borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  primaryBtn:{width:"100%",padding:"14px",background:C.green,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  secondaryBtn:{width:"100%",padding:"12px",background:C.white,color:C.textMid,border:`1.5px solid ${C.border}`,borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  countBar:{display:"flex",alignItems:"center",background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 16px",marginBottom:12},
+  countNum:{fontSize:30,fontWeight:800,color:C.text,lineHeight:1},
+  countLabel:{fontSize:13,fontWeight:600,color:C.textSoft},
+  countDivider:{width:1,height:30,background:C.border,margin:"0 16px"},
+  countBadge:{background:C.greenLight,color:C.green,padding:"4px 12px",borderRadius:20,fontSize:12,fontWeight:700},
+  recBox:{background:C.greenLight,border:`1.5px solid ${C.greenMid}`,borderRadius:10,padding:"12px 16px",marginBottom:12},
+  recLabel:{fontSize:10,fontWeight:800,color:C.greenMid,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:3},
+  recPitch:{fontSize:22,fontWeight:800,color:C.text,lineHeight:1.1},
+  recVelo:{fontSize:12,color:C.textMid,fontWeight:600,marginTop:2},
+  recReason:{fontSize:12,color:C.textMid,marginTop:8,lineHeight:1.5,fontWeight:500,borderTop:`1px solid rgba(45,106,79,0.2)`,paddingTop:8},
+  scoreCircle:{width:44,height:44,borderRadius:"50%",border:"2.5px solid",background:C.white,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800},
+  card:{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:12},
+  emptyState:{color:C.textSoft,fontSize:13,textAlign:"center",padding:48,fontWeight:500},
+};
 
 // ─── History Tab ──────────────────────────────────────────────────────────────
 function HistoryTab() {
@@ -1647,18 +1682,18 @@ function HistoryTab() {
   };
 
   if (statsView) {
-    const pitchCounts = {}, zoneCounts = {}, outcomesByPitch = {};
+    const pitchCounts={}, zoneCounts={}, outcomesByPitch={};
     statsData.forEach(p => {
-      pitchCounts[p.pitch_type] = (pitchCounts[p.pitch_type]||0)+1;
-      if (p.zone) zoneCounts[p.zone] = (zoneCounts[p.zone]||0)+1;
-      if (!outcomesByPitch[p.pitch_type]) outcomesByPitch[p.pitch_type]={outs:0,hits:0,total:0};
+      pitchCounts[p.pitch_type]=(pitchCounts[p.pitch_type]||0)+1;
+      if(p.zone) zoneCounts[p.zone]=(zoneCounts[p.zone]||0)+1;
+      if(!outcomesByPitch[p.pitch_type]) outcomesByPitch[p.pitch_type]={outs:0,hits:0,total:0};
       outcomesByPitch[p.pitch_type].total++;
-      if (p.is_out) outcomesByPitch[p.pitch_type].outs++;
-      if (p.on_base) outcomesByPitch[p.pitch_type].hits++;
+      if(p.is_out) outcomesByPitch[p.pitch_type].outs++;
+      if(p.on_base) outcomesByPitch[p.pitch_type].hits++;
     });
-    const sortedPitches = Object.entries(pitchCounts).sort((a,b)=>b[1]-a[1]);
-    const maxZone = Math.max(1,...Object.values(zoneCounts));
-    return (
+    const sortedPitches=Object.entries(pitchCounts).sort((a,b)=>b[1]-a[1]);
+    const maxZone=Math.max(1,...Object.values(zoneCounts));
+    return(
       <div style={{padding:"16px"}}>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
           <button onClick={()=>{setStatsView(null);setStatsData([]);}} style={{...S.ghostBtn,padding:"4px 10px"}}>← Back</button>
@@ -1703,19 +1738,19 @@ function HistoryTab() {
   }
 
   if (selected) {
-    const g = games.find(x=>x.id===selected);
-    if (!g) return null;
-    const log = g.game_log||[];
+    const g=games.find(x=>x.id===selected);
+    if(!g) return null;
+    const log=g.game_log||[];
     return(
       <div style={{padding:"16px"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
           <button onClick={()=>setSelected(null)} style={{...S.ghostBtn,padding:"4px 10px"}}>← Back</button>
           <div>
             <div style={{fontSize:14,fontWeight:800,color:C.text}}>{g.pitcher_name}</div>
             <div style={{fontSize:11,color:C.textSoft}}>{new Date(g.created_at).toLocaleDateString()} · {g.my_score}–{g.opp_score} · {g.total_pitches} pitches</div>
           </div>
         </div>
-        <button onClick={()=>loadStats("pitcher",g.pitcher_name)} style={{...S.ghostBtn,marginBottom:12}}>Pitcher Career Stats</button>
+        <button onClick={()=>loadStats("pitcher",g.pitcher_name)} style={{...S.ghostBtn,marginBottom:12}}>Career Stats for {g.pitcher_name}</button>
         <div style={S.sectionLabel}>Pitch Log</div>
         {log.length===0?<div style={S.emptyState}>No pitches.</div>:(
           [...log].reverse().map((e,i)=>{
@@ -1740,8 +1775,9 @@ function HistoryTab() {
         <div style={S.sectionLabel}>Game History</div>
         <span style={{fontSize:11,color:C.textSoft,fontWeight:700}}>{games.length} games</span>
       </div>
-      {loading?<div style={S.emptyState}>Loading...</div>:games.length===0?
-        <div style={S.emptyState}>No games saved yet. Finish a game and hit "Save Game" in the Log tab.</div>:(
+      {loading?<div style={S.emptyState}>Loading...</div>:games.length===0?(
+        <div style={S.emptyState}>No games saved yet. Finish a game and tap "Save Game" in the Log tab.</div>
+      ):(
         games.map(g=>(
           <div key={g.id} onClick={()=>setSelected(g.id)} style={{
             background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,
@@ -1766,27 +1802,27 @@ function HistoryTab() {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
-  const [tab,setTab] = useState("setup");
-  const [session,setSession] = useState(null);
-  const [showScorePrompt,setShowScorePrompt] = useState(false);
-  const [scoreInput,setScoreInput] = useState({my:0,opp:0});
-  const [saving,setSaving] = useState(false);
-  const [savedId,setSavedId] = useState(null);
+  const [tab,setTab]=useState("setup");
+  const [session,setSession]=useState(null);
+  const [showScorePrompt,setShowScorePrompt]=useState(false);
+  const [scoreInput,setScoreInput]=useState({my:0,opp:0});
+  const [saving,setSaving]=useState(false);
+  const [savedId,setSavedId]=useState(null);
 
-  const handleSetup = (config) => {
+  const handleSetup=(config)=>{
     setSession({
       ...config,
       sequence:[],outcomes:{},gameLog:[],batterIdx:0,
       outs:0,inning:1,myScore:0,oppScore:0,inningLog:[],
       bases:{first:null,second:null,third:null},
-      pitcherName: config.pitcherName||"Unknown",
-      pitcherOvr: config.pitcherOvr||0,
+      pitcherName:config.pitcherName||"Unknown",
+      pitcherOvr:config.pitcherOvr||0,
     });
     setTab("atbat");
     setSavedId(null);
   };
 
-  const handleLogPitch = useCallback((entry)=>{
+  const handleLogPitch=useCallback((entry)=>{
     setSession(prev=>{
       const no={...prev.outcomes};
       if(entry.isPositive){
@@ -1797,46 +1833,35 @@ function App() {
     });
   },[]);
 
-  const handleAddOut = useCallback(()=>{
+  const handleAddOut=useCallback(()=>{
     setSession(prev=>{
-      const newOuts=prev.outs+1;
-      if(newOuts>=3){
-        setShowScorePrompt(true);
-        setScoreInput({my:0,opp:0});
-        return{...prev,outs:0,inning:prev.inning+1,bases:{first:null,second:null,third:null}};
-      }
-      return{...prev,outs:newOuts};
+      const n=prev.outs+1;
+      if(n>=3){setShowScorePrompt(true);setScoreInput({my:0,opp:0});return{...prev,outs:0,inning:prev.inning+1,bases:{first:null,second:null,third:null}};}
+      return{...prev,outs:n};
     });
   },[]);
 
-  const handleScoreSubmit = ()=>{
-    setSession(prev=>({
-      ...prev,
-      myScore:prev.myScore+scoreInput.my,
-      oppScore:prev.oppScore+scoreInput.opp,
-      inningLog:[...prev.inningLog,{inning:prev.inning-1,my:scoreInput.my,opp:scoreInput.opp}],
-    }));
+  const handleScoreSubmit=()=>{
+    setSession(prev=>({...prev,myScore:prev.myScore+scoreInput.my,oppScore:prev.oppScore+scoreInput.opp,
+      inningLog:[...prev.inningLog,{inning:prev.inning-1,my:scoreInput.my,opp:scoreInput.opp}]}));
     setShowScorePrompt(false);
   };
 
-  const handleNewAtBat = useCallback(()=>{
+  const handleNewAtBat=useCallback(()=>{
     setSession(prev=>{
-      const validBatters=prev.lineup?prev.lineup.filter(b=>b.name):[];
-      const nextIdx=validBatters.length>0?((prev.batterIdx+1)%validBatters.length):0;
-      return{...prev,sequence:[],batterIdx:nextIdx};
+      const v=prev.lineup?prev.lineup.filter(b=>b.name):[];
+      return{...prev,sequence:[],batterIdx:v.length>0?(prev.batterIdx+1)%v.length:0};
     });
   },[]);
 
-  const handleSub=(slot,newBatter)=>setSession(prev=>{
+  const handleSub=(slot,nb)=>setSession(prev=>{
     if(!prev.lineup) return prev;
     const nl=[...prev.lineup];
-    nl[slot]={name:newBatter.name,bat:newBatter.bat,custom:false};
+    nl[slot]={name:nb.name,bat:nb.bat,custom:false};
     return{...prev,lineup:nl};
   });
 
-  const handleUpdateBases=useCallback((newBases)=>{
-    setSession(prev=>({...prev,bases:newBases}));
-  },[]);
+  const handleUpdateBases=useCallback((b)=>setSession(prev=>({...prev,bases:b})),[]);
 
   const handleSaveGame=async()=>{
     if(!session||saving) return;
@@ -1847,13 +1872,7 @@ function App() {
   };
 
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
-  const TABS=[
-    {id:"setup",label:"Setup"},
-    {id:"atbat",label:"At-Bat"},
-    {id:"visuals",label:"Visuals"},
-    {id:"log",label:"Log"},
-    {id:"history",label:"History"},
-  ];
+  const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"},{id:"history",label:"History"}];
 
   return(
     <div style={S.root}>
@@ -1864,25 +1883,25 @@ function App() {
             <div style={S.headerTitle}>Pitch IQ</div>
           </div>
           {session&&(
-            <div style={{display:"flex",gap:12,alignItems:"center"}}>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
               <div style={{textAlign:"center"}}>
-                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"}}>Score</div>
-                <div style={{fontSize:15,fontWeight:800,color:"#fff",lineHeight:1}}>{session.myScore}–{session.oppScore}</div>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Score</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.myScore}–{session.oppScore}</div>
               </div>
-              <div style={{width:1,height:28,background:"rgba(255,255,255,0.2)"}}/>
+              <div style={{width:1,height:24,background:"rgba(255,255,255,0.2)"}}/>
               <div style={{textAlign:"center"}}>
-                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"}}>Inn</div>
-                <div style={{fontSize:15,fontWeight:800,color:"#fff",lineHeight:1}}>{ordinal(session.inning)}</div>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Inn</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{ordinal(session.inning)}</div>
               </div>
               <div style={{textAlign:"center"}}>
-                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"}}>Outs</div>
-                <div style={{display:"flex",gap:3,marginTop:3,justifyContent:"center"}}>
-                  {[0,1,2].map(i=>(<div key={i} style={{width:9,height:9,borderRadius:"50%",background:i<session.outs?"#fff":"rgba(255,255,255,0.25)",border:"1.5px solid rgba(255,255,255,0.4)"}}/>))}
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Outs</div>
+                <div style={{display:"flex",gap:3,marginTop:2,justifyContent:"center"}}>
+                  {[0,1,2].map(i=>(<div key={i} style={{width:8,height:8,borderRadius:"50%",background:i<session.outs?"#fff":"rgba(255,255,255,0.25)",border:"1px solid rgba(255,255,255,0.4)"}}/>))}
                 </div>
               </div>
               <div style={{textAlign:"center"}}>
-                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"}}>P</div>
-                <div style={{fontSize:15,fontWeight:800,color:"#fff",lineHeight:1}}>{session.gameLog?.length||0}</div>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>P</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.gameLog?.length||0}</div>
               </div>
             </div>
           )}
@@ -1895,7 +1914,7 @@ function App() {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
             {[["My runs",scoreInput.my,"my"],["Opp runs",scoreInput.opp,"opp"]].map(([lbl,val,key])=>(
               <div key={key}>
-                <div style={{fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.06em"}}>{lbl}</div>
+                <div style={{fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:4,textTransform:"uppercase"}}>{lbl}</div>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <button onClick={()=>setScoreInput(s=>({...s,[key]:Math.max(0,s[key]-1)}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>−</button>
                   <span style={{fontSize:18,fontWeight:800,color:C.text,minWidth:24,textAlign:"center"}}>{val}</span>
@@ -1914,20 +1933,15 @@ function App() {
 
       <div style={S.content}>
         {tab==="setup"&&<SetupTab onComplete={handleSetup}/>}
-        {tab==="atbat"&&(session
-          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases}/>
-          :<div style={S.emptyState}>Complete setup first.</div>
-        )}
+        {tab==="atbat"&&(session?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases}/>:<div style={S.emptyState}>Complete setup first.</div>)}
         {tab==="visuals"&&(session?<VisualsTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
-        {tab==="log"&&(session
-          ?<div>
+        {tab==="log"&&(session?
+          <div>
             <LogTab session={session}/>
             <div style={{padding:"0 16px 16px"}}>
               {savedId
                 ?<div style={{textAlign:"center",padding:"12px",background:C.greenLight,borderRadius:8,color:C.green,fontWeight:700,fontSize:13}}>✓ Game saved to history</div>
-                :<button onClick={handleSaveGame} style={{...S.primaryBtn,opacity:saving?0.6:1}} disabled={saving}>
-                  {saving?"Saving...":"Save Game to History"}
-                </button>
+                :<button onClick={handleSaveGame} style={{...S.primaryBtn,opacity:saving?0.6:1}} disabled={saving}>{saving?"Saving...":"Save Game to History"}</button>
               }
             </div>
           </div>
@@ -1939,8 +1953,8 @@ function App() {
   );
 }
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+const root=ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
 </script>
 </body>
 </html>
