@@ -24,7 +24,31 @@ const { useState, useCallback, useMemo, useEffect } = React;
 
 const sb = supabase.createClient("https://giqhacohjkuskljpqzsd.supabase.co", "sb_publishable_uABrRkYvlops5IXCIR3tmA_ey5eCSWn");
 
-async function saveGame(session) {
+// ─── User identity (username + PIN, stored in localStorage) ──────────────────
+const USER_KEY = "pitchiq_user";
+
+function hashPin(pin) {
+  // Simple deterministic hash -- not cryptographic, just obfuscation
+  let h = 0;
+  for (let i = 0; i < pin.length; i++) { h = ((h << 5) - h) + pin.charCodeAt(i); h |= 0; }
+  return Math.abs(h).toString(36);
+}
+
+function getStoredUser() {
+  try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch(e) { return null; }
+}
+
+function storeUser(username, pin) {
+  const user = { username: username.toLowerCase().trim(), pinHash: hashPin(pin) };
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  return user;
+}
+
+function clearStoredUser() {
+  localStorage.removeItem(USER_KEY);
+}
+
+async function saveGame(session, user) {
   try {
     const { data: game, error: ge } = await sb.from("games").insert({
       pitcher_name: session.pitcherName || "Unknown",
@@ -35,6 +59,8 @@ async function saveGame(session) {
       innings: session.inning || 1,
       total_pitches: session.gameLog?.length || 0,
       game_log: session.gameLog || [],
+      username: user?.username || "anon",
+      pin_hash: user?.pinHash || "",
     }).select().single();
     if (ge) { console.error("Save game error:", ge); return null; }
     if (session.gameLog?.length > 0) {
@@ -52,6 +78,7 @@ async function saveGame(session) {
         inning: e.inning || 1,
         balls: e.balls || 0,
         strikes: e.strikes || 0,
+        username: user?.username || "anon",
       }));
       const { error: pe } = await sb.from("pitch_log").insert(rows);
       if (pe) console.error("Save pitches error:", pe);
@@ -59,18 +86,35 @@ async function saveGame(session) {
     return game.id;
   } catch(e) { console.error("saveGame:", e); return null; }
 }
-async function loadGames(limit=30) {
-  const { data, error } = await sb.from("games").select("*").order("created_at",{ascending:false}).limit(limit);
+
+async function loadGames(user, limit=30) {
+  if (!user) return [];
+  const { data, error } = await sb.from("games")
+    .select("*")
+    .eq("username", user.username)
+    .eq("pin_hash", user.pinHash)
+    .order("created_at",{ascending:false})
+    .limit(limit);
   if (error) { console.error("loadGames:", error); return []; }
   return data || [];
 }
-async function loadPitcherStats(name) {
-  const { data, error } = await sb.from("pitch_log").select("*").eq("pitcher_name", name);
+
+async function loadPitcherStats(name, user) {
+  if (!user) return [];
+  const { data, error } = await sb.from("pitch_log")
+    .select("*")
+    .eq("pitcher_name", name)
+    .eq("username", user.username);
   if (error) { console.error("loadPitcherStats:", error); return []; }
   return data || [];
 }
-async function loadBatterTendencies(name) {
-  const { data, error } = await sb.from("pitch_log").select("*").eq("batter_name", name);
+
+async function loadBatterTendencies(name, user) {
+  if (!user) return [];
+  const { data, error } = await sb.from("pitch_log")
+    .select("*")
+    .eq("batter_name", name)
+    .eq("username", user.username);
   if (error) { console.error("loadBatterTendencies:", error); return []; }
   return data || [];
 }
@@ -1661,17 +1705,64 @@ const S={
   emptyState:{color:C.textSoft,fontSize:13,textAlign:"center",padding:48,fontWeight:500},
 };
 
-function HistoryTab() {
+// ─── Login Screen ─────────────────────────────────────────────────────────────
+function LoginScreen({onLogin}) {
+  const [username, setUsername] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  const handleSubmit = () => {
+    if (username.trim().length < 2) { setError("Username must be at least 2 characters."); return; }
+    if (pin.length < 4) { setError("PIN must be at least 4 digits."); return; }
+    if (!/^\d+$/.test(pin)) { setError("PIN must be numbers only."); return; }
+    const user = storeUser(username, pin);
+    onLogin(user);
+  };
+
+  return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",background:"#f5f2ec"}}>
+      <div style={{width:"100%",maxWidth:360}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:40,marginBottom:8}}>⚾</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#2d6a4f"}}>Pitch IQ</div>
+          <div style={{fontSize:13,color:"#8a9e93",marginTop:4,fontWeight:500}}>Set up your account to save game history</div>
+        </div>
+        <div style={{background:"#fff",borderRadius:12,padding:"24px",border:"1.5px solid #d8d4ca"}}>
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#8a9e93",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:6}}>Username</div>
+            <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="e.g. danny"
+              style={{width:"100%",padding:"10px 12px",border:"1.5px solid #d8d4ca",borderRadius:8,fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+          </div>
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#8a9e93",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:6}}>PIN (4+ digits)</div>
+            <input value={pin} onChange={e=>setPin(e.target.value)} placeholder="e.g. 1234" type="password" inputMode="numeric"
+              style={{width:"100%",padding:"10px 12px",border:"1.5px solid #d8d4ca",borderRadius:8,fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+            <div style={{fontSize:11,color:"#8a9e93",marginTop:5,fontWeight:500}}>Remember your PIN -- it protects your history.</div>
+          </div>
+          {error&&<div style={{fontSize:12,color:"#b5451b",fontWeight:600,marginBottom:12}}>{error}</div>}
+          <button onClick={handleSubmit} style={{width:"100%",padding:"14px",background:"#2d6a4f",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
+            Get Started
+          </button>
+        </div>
+        <div style={{textAlign:"center",marginTop:12,fontSize:11,color:"#8a9e93",fontWeight:500}}>
+          Same username + PIN = same history, any device
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HistoryTab({user}) {
   const [games,setGames]=useState([]);
   const [loading,setLoading]=useState(true);
   const [selected,setSelected]=useState(null);
   const [statsView,setStatsView]=useState(null);
   const [statsData,setStatsData]=useState([]);
   const [statsLoading,setStatsLoading]=useState(false);
-  useEffect(()=>{loadGames(30).then(g=>{setGames(g);setLoading(false);});},[]);
+  useEffect(()=>{loadGames(user,30).then(g=>{setGames(g);setLoading(false);});},[user]);
   const doLoadStats=async(type,name)=>{
     setStatsLoading(true);setStatsView({type,name});
-    const d=type==="pitcher"?await loadPitcherStats(name):await loadBatterTendencies(name);
+    const d=type==="pitcher"?await loadPitcherStats(name,user):await loadBatterTendencies(name,user);
     setStatsData(d);setStatsLoading(false);
   };
   if(statsView){
@@ -1777,6 +1868,11 @@ function App(){
   const [scoreInput,setScoreInput]=useState({my:0,opp:0});
   const [saving,setSaving]=useState(false);
   const [savedId,setSavedId]=useState(null);
+  const [user,setUser]=useState(()=>getStoredUser());
+
+  // Show login screen if no user
+  if (!user) return <LoginScreen onLogin={setUser}/>;
+
   const handleSetup=(config)=>{
     setSession({...config,sequence:[],outcomes:{},gameLog:[],batterIdx:0,
       outs:0,inning:1,myScore:0,oppScore:0,inningLog:[],bases:{first:null,second:null,third:null}});
@@ -1816,8 +1912,9 @@ function App(){
   const handleUpdateBases=useCallback((b)=>setSession(prev=>({...prev,bases:b})),[]);
   const handleSaveGame=async()=>{
     if(!session||saving) return;
-    setSaving(true);const id=await saveGame(session);setSaving(false);if(id) setSavedId(id);
+    setSaving(true);const id=await saveGame(session,user);setSaving(false);if(id) setSavedId(id);
   };
+  const handleLogout=()=>{clearStoredUser();setUser(null);};
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
   const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"},{id:"history",label:"History"}];
   return(
@@ -1828,28 +1925,35 @@ function App(){
             <span style={{fontSize:20}}>⚾</span>
             <div style={S.headerTitle}>Pitch IQ</div>
           </div>
-          {session&&(<div style={{display:"flex",gap:10,alignItems:"center"}}>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Score</div>
-              <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.myScore}–{session.oppScore}</div>
-            </div>
-            <div style={{width:1,height:24,background:"rgba(255,255,255,0.2)"}}/>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Inn</div>
-              <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{ordinal(session.inning)}</div>
-            </div>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Outs</div>
-              <div style={{display:"flex",gap:3,marginTop:2,justifyContent:"center"}}>
-                {[0,1,2].map(i=>(<div key={i} style={{width:8,height:8,borderRadius:"50%",
-                  background:i<session.outs?"#fff":"rgba(255,255,255,0.25)",border:"1px solid rgba(255,255,255,0.4)"}}/>))}
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            {session&&(<div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Score</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.myScore}–{session.oppScore}</div>
               </div>
+              <div style={{width:1,height:24,background:"rgba(255,255,255,0.2)"}}/>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Inn</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{ordinal(session.inning)}</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Outs</div>
+                <div style={{display:"flex",gap:3,marginTop:2,justifyContent:"center"}}>
+                  {[0,1,2].map(i=>(<div key={i} style={{width:8,height:8,borderRadius:"50%",
+                    background:i<session.outs?"#fff":"rgba(255,255,255,0.25)",border:"1px solid rgba(255,255,255,0.4)"}}/>))}
+                </div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>P</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.gameLog?.length||0}</div>
+              </div>
+              <div style={{width:1,height:24,background:"rgba(255,255,255,0.2)"}}/>
+            </div>)}
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.9)"}}>{user.username}</div>
+              <button onClick={handleLogout} style={{fontSize:9,color:"rgba(255,255,255,0.5)",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:0,fontWeight:600}}>sign out</button>
             </div>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>P</div>
-              <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.gameLog?.length||0}</div>
-            </div>
-          </div>)}
+          </div>
         </div>
       </div>
       {showScorePrompt&&(<div style={{background:C.white,borderBottom:`2px solid ${C.border}`,padding:"12px 16px"}}>
@@ -1890,7 +1994,7 @@ function App(){
           </div>
           :<div style={S.emptyState}>Complete setup first.</div>
         )}
-        {tab==="history"&&<HistoryTab/>}
+        {tab==="history"&&<HistoryTab user={user}/>}
       </div>
     </div>
   );
