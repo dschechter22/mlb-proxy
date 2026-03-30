@@ -59,19 +59,16 @@ async function saveGame(session) {
     return game.id;
   } catch(e) { console.error("saveGame:", e); return null; }
 }
-
 async function loadGames(limit=30) {
   const { data, error } = await sb.from("games").select("*").order("created_at",{ascending:false}).limit(limit);
   if (error) { console.error("loadGames:", error); return []; }
   return data || [];
 }
-
 async function loadPitcherStats(name) {
   const { data, error } = await sb.from("pitch_log").select("*").eq("pitcher_name", name);
   if (error) { console.error("loadPitcherStats:", error); return []; }
   return data || [];
 }
-
 async function loadBatterTendencies(name) {
   const { data, error } = await sb.from("pitch_log").select("*").eq("batter_name", name);
   if (error) { console.error("loadBatterTendencies:", error); return []; }
@@ -1628,14 +1625,6 @@ function LogTab({session}){
     </div>
   );
 }
-
-          {tab==="log"&&(session?<LogTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
-        </div>
-      </div>
-    </>
-  );
-}
-
 const S={
   root:{background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",fontFamily:"'Nunito',sans-serif",color:C.text},
   header:{padding:"16px",background:C.green},
@@ -1838,51 +1827,47 @@ function App(){
             <span style={{fontSize:20}}>⚾</span>
             <div style={S.headerTitle}>Pitch IQ</div>
           </div>
-          {session&&(
-            <div style={{display:"flex",gap:10,alignItems:"center"}}>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Score</div>
-                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.myScore}–{session.oppScore}</div>
-              </div>
-              <div style={{width:1,height:24,background:"rgba(255,255,255,0.2)"}}/>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Inn</div>
-                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{ordinal(session.inning)}</div>
-              </div>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Outs</div>
-                <div style={{display:"flex",gap:3,marginTop:2,justifyContent:"center"}}>
-                  {[0,1,2].map(i=>(<div key={i} style={{width:8,height:8,borderRadius:"50%",
-                    background:i<session.outs?"#fff":"rgba(255,255,255,0.25)",border:"1px solid rgba(255,255,255,0.4)"}}/>))}
-                </div>
-              </div>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>P</div>
-                <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.gameLog?.length||0}</div>
+          {session&&(<div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Score</div>
+              <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.myScore}–{session.oppScore}</div>
+            </div>
+            <div style={{width:1,height:24,background:"rgba(255,255,255,0.2)"}}/>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Inn</div>
+              <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{ordinal(session.inning)}</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>Outs</div>
+              <div style={{display:"flex",gap:3,marginTop:2,justifyContent:"center"}}>
+                {[0,1,2].map(i=>(<div key={i} style={{width:8,height:8,borderRadius:"50%",
+                  background:i<session.outs?"#fff":"rgba(255,255,255,0.25)",border:"1px solid rgba(255,255,255,0.4)"}}/>))}
               </div>
             </div>
-          )}
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:9,color:"rgba(255,255,255,0.55)",fontWeight:700,textTransform:"uppercase"}}>P</div>
+              <div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{session.gameLog?.length||0}</div>
+            </div>
+          </div>)}
         </div>
       </div>
 
-      {showScorePrompt&&(
-        <div style={{background:C.white,borderBottom:`2px solid ${C.border}`,padding:"12px 16px"}}>
-          <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:8}}>Half-inning over — runs scored?</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-            {[["My runs",scoreInput.my,"my"],["Opp runs",scoreInput.opp,"opp"]].map(([lbl,val,key])=>(
-              <div key={key}>
-                <div style={{fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:4,textTransform:"uppercase"}}>{lbl}</div>
-                <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <button onClick={()=>setScoreInput(s=>({...s,[key]:Math.max(0,s[key]-1)}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>−</button>
-                  <span style={{fontSize:18,fontWeight:800,color:C.text,minWidth:24,textAlign:"center"}}>{val}</span>
-                  <button onClick={()=>setScoreInput(s=>({...s,[key]:s[key]+1}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>+</button>
-                </div>
+      {showScorePrompt&&(<div style={{background:C.white,borderBottom:`2px solid ${C.border}`,padding:"12px 16px"}}>
+        <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:8}}>Half-inning over — runs scored?</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+          {[["My runs",scoreInput.my,"my"],["Opp runs",scoreInput.opp,"opp"]].map(([lbl,val,key])=>(
+            <div key={key}>
+              <div style={{fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:4,textTransform:"uppercase"}}>{lbl}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <button onClick={()=>setScoreInput(s=>({...s,[key]:Math.max(0,s[key]-1)}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>−</button>
+                <span style={{fontSize:18,fontWeight:800,color:C.text,minWidth:24,textAlign:"center"}}>{val}</span>
+                <button onClick={()=>setScoreInput(s=>({...s,[key]:s[key]+1}))} style={{...S.ghostBtn,padding:"4px 10px",fontSize:14}}>+</button>
               </div>
-            ))}
-          </div>
-          <button onClick={handleScoreSubmit} style={{...S.primaryBtn}}>Continue →</button>
+            </div>
+          ))}
         </div>
-      )}
+        <button onClick={handleScoreSubmit} style={{...S.primaryBtn}}>Continue →</button>
+      </div>)}
 
       <div style={S.tabBar}>
         {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={tab===t.id?S.tabOn:S.tabOff}>{t.label}</button>))}
