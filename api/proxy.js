@@ -1,3 +1,5 @@
+const https = require("https");
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -12,22 +14,27 @@ export default async function handler(req, res) {
 
   const targetUrl = "https://mlb26.theshow.com" + path;
 
-  try {
-    const response = await fetch(targetUrl, {
+  return new Promise((resolve) => {
+    https.get(targetUrl, {
       headers: {
         "Accept": "application/json",
         "User-Agent": "Mozilla/5.0",
-      },
+      }
+    }, (response) => {
+      let data = "";
+      response.on("data", chunk => { data += chunk; });
+      response.on("end", () => {
+        try {
+          res.setHeader("Cache-Control", "s-maxage=300");
+          res.status(200).json(JSON.parse(data));
+        } catch(e) {
+          res.status(502).json({ error: "parse error", raw: data.slice(0, 200) });
+        }
+        resolve();
+      });
+    }).on("error", (err) => {
+      res.status(502).json({ error: err.message, target: targetUrl });
+      resolve();
     });
-    const data = await response.json();
-    res.setHeader("Cache-Control", "s-maxage=300");
-    return res.status(200).json(data);
-  } catch (err) {
-    return res.status(502).json({ error: err.message, target: targetUrl });
-  }
+  });
 }
-```
-
-Commit the change. Vercel will auto-redeploy in about 30 seconds. Then test this URL in your browser to confirm item fetch works:
-```
-https://mlb-proxy-lovat.vercel.app/api/proxy?path=/apis/item.json?uuid=b4d18dfeb0c12adad6c47445f70984fb
