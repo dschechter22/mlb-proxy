@@ -22,101 +22,68 @@
 <script type="text/babel" data-presets="react" data-plugins="transform-modules-umd">
 const { useState, useCallback, useMemo, useEffect } = React;
 
+// ─── Supabase ─────────────────────────────────────────────────────────────────
 const sb = supabase.createClient("https://giqhacohjkuskljpqzsd.supabase.co", "sb_publishable_uABrRkYvlops5IXCIR3tmA_ey5eCSWn");
 
-// ─── User identity (username + PIN, stored in localStorage) ──────────────────
 const USER_KEY = "pitchiq_user";
-
 function hashPin(pin) {
-  // Simple deterministic hash -- not cryptographic, just obfuscation
-  let h = 0;
-  for (let i = 0; i < pin.length; i++) { h = ((h << 5) - h) + pin.charCodeAt(i); h |= 0; }
-  return Math.abs(h).toString(36);
+  let h=0; for(let i=0;i<pin.length;i++){h=((h<<5)-h)+pin.charCodeAt(i);h|=0;} return Math.abs(h).toString(36);
+}
+function getStoredUser() { try{return JSON.parse(localStorage.getItem(USER_KEY));}catch(e){return null;} }
+function storeUser(username,pin) { const u={username:username.toLowerCase().trim(),pinHash:hashPin(pin)};localStorage.setItem(USER_KEY,JSON.stringify(u));return u; }
+function clearStoredUser() { localStorage.removeItem(USER_KEY); }
+
+async function validateUser(username, pin) {
+  const pinHash=hashPin(pin); const uname=username.toLowerCase().trim();
+  const{data,error}=await sb.from("games").select("pin_hash").eq("username",uname).limit(1);
+  if(error) return{ok:true,pinHash,uname};
+  if(!data||data.length===0) return{ok:true,pinHash,uname};
+  if(data[0].pin_hash===pinHash) return{ok:true,pinHash,uname};
+  return{ok:false};
 }
 
-function getStoredUser() {
-  try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch(e) { return null; }
-}
-
-function storeUser(username, pin) {
-  const user = { username: username.toLowerCase().trim(), pinHash: hashPin(pin) };
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-  return user;
-}
-
-function clearStoredUser() {
-  localStorage.removeItem(USER_KEY);
-}
-
-async function saveGame(session, user) {
+async function saveGame(session,user) {
   try {
-    const { data: game, error: ge } = await sb.from("games").insert({
-      pitcher_name: session.pitcherName || "Unknown",
-      pitcher_hand: session.pitcherHand || "R",
-      pitcher_ovr: session.pitcherOvr || 0,
-      my_score: session.myScore || 0,
-      opp_score: session.oppScore || 0,
-      innings: session.inning || 1,
-      total_pitches: session.gameLog?.length || 0,
-      game_log: session.gameLog || [],
-      username: user?.username || "anon",
-      pin_hash: user?.pinHash || "",
+    const{data:game,error:ge}=await sb.from("games").insert({
+      pitcher_name:session.pitcherName||"Unknown", pitcher_hand:session.pitcherHand||"R",
+      pitcher_ovr:session.pitcherOvr||0, my_score:session.myScore||0, opp_score:session.oppScore||0,
+      innings:session.inning||1, total_pitches:session.gameLog?.length||0,
+      game_log:session.gameLog||[], username:user?.username||"anon", pin_hash:user?.pinHash||"",
     }).select().single();
-    if (ge) { console.error("Save game error:", ge); return null; }
-    if (session.gameLog?.length > 0) {
-      const rows = session.gameLog.map(e => ({
-        game_id: game.id,
-        pitcher_name: session.pitcherName || "Unknown",
-        batter_name: e.batter || "",
-        batter_hand: e.batterHand || "",
-        pitch_type: e.pitch,
-        zone: e.zone,
-        outcome: e.outcome,
-        outcome_id: e.outcomeId,
-        is_out: e.isOut || false,
-        on_base: e.onBase || false,
-        inning: e.inning || 1,
-        balls: e.balls || 0,
-        strikes: e.strikes || 0,
-        username: user?.username || "anon",
+    if(ge){console.error("Save game error:",ge);return null;}
+    if(session.gameLog?.length>0){
+      const rows=session.gameLog.map(e=>({
+        game_id:game.id, pitcher_name:session.pitcherName||"Unknown",
+        batter_name:e.batter||"", batter_hand:e.batterHand||"",
+        pitch_type:e.pitch, zone:e.zone, outcome:e.outcome, outcome_id:e.outcomeId,
+        is_out:e.isOut||false, on_base:e.onBase||false,
+        inning:e.inning||1, balls:e.balls||0, strikes:e.strikes||0,
+        username:user?.username||"anon",
       }));
-      const { error: pe } = await sb.from("pitch_log").insert(rows);
-      if (pe) console.error("Save pitches error:", pe);
+      const{error:pe}=await sb.from("pitch_log").insert(rows);
+      if(pe) console.error("Save pitches error:",pe);
     }
     return game.id;
-  } catch(e) { console.error("saveGame:", e); return null; }
+  } catch(e){console.error("saveGame:",e);return null;}
 }
 
-async function loadGames(user, limit=30) {
-  if (!user) return [];
-  const { data, error } = await sb.from("games")
-    .select("*")
-    .eq("username", user.username)
-    .eq("pin_hash", user.pinHash)
-    .order("created_at",{ascending:false})
-    .limit(limit);
-  if (error) { console.error("loadGames:", error); return []; }
-  return data || [];
+async function loadGames(user,limit=30) {
+  if(!user) return[];
+  const{data,error}=await sb.from("games").select("*").eq("username",user.username).eq("pin_hash",user.pinHash).order("created_at",{ascending:false}).limit(limit);
+  if(error){console.error("loadGames:",error);return[];}
+  return data||[];
 }
-
-async function loadPitcherStats(name, user) {
-  if (!user) return [];
-  const { data, error } = await sb.from("pitch_log")
-    .select("*")
-    .eq("pitcher_name", name)
-    .eq("username", user.username);
-  if (error) { console.error("loadPitcherStats:", error); return []; }
-  return data || [];
+async function loadPitcherStats(name,user) {
+  if(!user) return[];
+  const{data,error}=await sb.from("pitch_log").select("*").eq("pitcher_name",name).eq("username",user.username);
+  if(error){console.error("loadPitcherStats:",error);return[];}
+  return data||[];
 }
-
-async function loadBatterTendencies(name, user) {
-  if (!user) return [];
-  const { data, error } = await sb.from("pitch_log")
-    .select("*")
-    .eq("batter_name", name)
-    .eq("username", user.username);
-  if (error) { console.error("loadBatterTendencies:", error); return []; }
-  return data || [];
+async function loadBatterTendencies(name,user) {
+  if(!user) return[];
+  const{data,error}=await sb.from("pitch_log").select("*").eq("batter_name",name).eq("username",user.username);
+  if(error){console.error("loadBatterTendencies:",error);return[];}
+  return data||[];
 }
 
 
@@ -270,6 +237,7 @@ async function searchBatters(query) {
       rarity: c.rarity || "",
       series: c.series || "",
       speed: c.speed || 50,
+      uuid: c.uuid || "",
       fromApi: true,
     }));
 }
@@ -688,7 +656,7 @@ function LineupSetup({onSave}){
 
   const selectBatter=(slot,batter)=>{
     const next=[...lineup];
-    next[slot]={name:batter.name,bat:batter.bat,custom:false,ovr:batter.ovr,speed:batter.speed};
+    next[slot]={name:batter.name,bat:batter.bat,custom:false,ovr:batter.ovr,speed:batter.speed,uuid:batter.uuid||""};
     setLineup(next);
     setActiveSlot(null);
     setQuery("");
@@ -1014,15 +982,26 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
   const[subSlot,setSubSlot]=useState(null);
   const[contactPending,setContactPending]=useState(null);
   const[showOutConfirm,setShowOutConfirm]=useState(false);
-  // Hit type flow: "single"|"double"|"triple"|"hr"|null
   const[hitType,setHitType]=useState(null);
-  // Runner advancement: list of runners that need to be resolved
-  const[runnersToResolve,setRunnersToResolve]=useState([]); // [{base,name}]
-  const[resolvedRunners,setResolvedRunners]=useState([]); // {base->newBase or "scored"}
+  const[runnersToResolve,setRunnersToResolve]=useState([]);
+  const[resolvedRunners,setResolvedRunners]=useState([]);
   const[runnerResolutionIdx,setRunnerResolutionIdx]=useState(0);
+  const[batterStats,setBatterStats]=useState(null);
+  const[batterStatsLoading,setBatterStatsLoading]=useState(false);
 
   const currentBatter=lineup?lineup[batterIdx]:null;
   const effectiveBatterHand=currentBatter?(currentBatter.bat==="S"?"R":currentBatter.bat):session.batterHand;
+
+  // Fetch batter stats when batter changes
+  useEffect(()=>{
+    setBatterStats(null);
+    if(!currentBatter?.uuid) return;
+    setBatterStatsLoading(true);
+    fetchItemByUuid(currentBatter.uuid).then(data=>{
+      if(data) setBatterStats(data);
+      setBatterStatsLoading(false);
+    }).catch(()=>setBatterStatsLoading(false));
+  },[currentBatter?.uuid]);
   const countKey=`${balls}-${strikes}`;
   const lastEntry=sequence.length>0?sequence[sequence.length-1]:null;
   const lastThrown=lastEntry?lastEntry.pitch:null;
@@ -1147,8 +1126,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
   };
 
   const startHitFlow=(contactOc,hitTypeId)=>{
-    // Log the pitch
-    onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:hitTypeId.charAt(0).toUpperCase()+hitTypeId.slice(1),outcomeId:contactOc.id,isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||""});
+    onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:hitTypeId.charAt(0).toUpperCase()+hitTypeId.slice(1),outcomeId:contactOc.id,isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||"",batterHand:effectiveBatterHand,inning,balls,strikes});
     setSelectedZone(null);
     setContactPending(null);
     const currentBases=session.bases||{first:null,second:null,third:null};
@@ -1158,19 +1136,20 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
       currentBases.third&&{base:"third",name:currentBases.third.name||"Runner"},
     ].filter(Boolean);
     if(hitTypeId==="hr"){
-      // Clear all bases
       onUpdateBases({first:null,second:null,third:null});
-      setShowOutConfirm(true);
+      // Auto-advance to next batter
+      setBalls(0);setStrikes(0);setSelectedZone(null);
+      onNewAtBat();
     } else if(occupied.length===0){
-      // No runners -- just place batter
       const newBases={first:null,second:null,third:null};
       if(hitTypeId==="single") newBases.first={name:currentBatter?.name||"Batter",fast:false};
       if(hitTypeId==="double") newBases.second={name:currentBatter?.name||"Batter",fast:false};
       if(hitTypeId==="triple") newBases.third={name:currentBatter?.name||"Batter",fast:false};
       onUpdateBases(newBases);
-      setShowOutConfirm(true);
+      // Auto-advance to next batter
+      setBalls(0);setStrikes(0);setSelectedZone(null);
+      onNewAtBat();
     } else {
-      // Need to resolve existing runners one at a time
       setHitType(hitTypeId);
       setRunnersToResolve(occupied);
       setRunnerResolutionIdx(0);
@@ -1182,15 +1161,12 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
     const runner=runnersToResolve[runnerResolutionIdx];
     const next=[...resolvedRunners,{...runner,newBase}];
     if(runnerResolutionIdx+1>=runnersToResolve.length){
-      // All resolved -- build new bases state
       const newBases={first:null,second:null,third:null};
       next.forEach(r=>{
         if(r.newBase==="first") newBases.first={name:r.name,fast:false};
         else if(r.newBase==="second") newBases.second={name:r.name,fast:false};
         else if(r.newBase==="third") newBases.third={name:r.name,fast:false};
-        // "scored" = removed
       });
-      // Place batter
       const bn=currentBatter?.name||"Batter";
       if(hitType==="single"&&!newBases.first) newBases.first={name:bn,fast:false};
       else if(hitType==="double"&&!newBases.second) newBases.second={name:bn,fast:false};
@@ -1200,7 +1176,9 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
       setResolvedRunners([]);
       setRunnerResolutionIdx(0);
       setHitType(null);
-      setShowOutConfirm(true);
+      // Auto-advance to next batter
+      setBalls(0);setStrikes(0);setSelectedZone(null);
+      onNewAtBat();
     } else {
       setResolvedRunners(next);
       setRunnerResolutionIdx(i=>i+1);
@@ -1255,16 +1233,42 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
 
       {/* Batter banner */}
       {currentBatter&&(
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-          background:C.greenDim,border:`1.5px solid ${C.greenMid}`,borderRadius:8,padding:"8px 12px",marginBottom:10}}>
-          <div>
-            <div style={{fontSize:10,fontWeight:800,color:C.greenMid,letterSpacing:"0.08em",textTransform:"uppercase"}}>At Bat</div>
-            <div style={{fontSize:14,fontWeight:800,color:C.text}}>{currentBatter.name||`Batter ${batterIdx+1}`}</div>
+        <div style={{background:C.greenDim,border:`1.5px solid ${C.greenMid}`,borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:C.greenMid,letterSpacing:"0.08em",textTransform:"uppercase"}}>At Bat</div>
+              <div style={{fontSize:14,fontWeight:800,color:C.text}}>{currentBatter.name||`Batter ${batterIdx+1}`}</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:11,color:C.textSoft,fontWeight:600}}>{currentBatter.bat==="S"?"Switch":currentBatter.bat==="L"?"LHB":"RHB"}</span>
+              <button onClick={()=>setShowSub(!showSub)} style={{...S.ghostBtn,padding:"4px 10px",fontSize:10}}>Sub</button>
+            </div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:11,color:C.textSoft,fontWeight:600}}>{currentBatter.bat==="S"?"Switch":currentBatter.bat==="L"?"LHB":"RHB"}</span>
-            <button onClick={()=>setShowSub(!showSub)} style={{...S.ghostBtn,padding:"4px 10px",fontSize:10}}>Sub</button>
-          </div>
+          {/* Batter stats row */}
+          {(()=>{
+            const hand=pitcherHand==="R"?"right":"left";
+            const runnersInScoring=!!(session.bases?.second||session.bases?.third);
+            const pwr=batterStats?batterStats[`power_${hand}`]:null;
+            const con=batterStats?(runnersInScoring?batterStats.batting_clutch:batterStats[`contact_${hand}`]):null;
+            const conLabel=runnersInScoring?"CLU":"CON";
+            return(
+              <div style={{display:"flex",gap:12,marginTop:2}}>
+                <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                  <span style={{fontSize:9,fontWeight:700,color:C.textSoft,textTransform:"uppercase",letterSpacing:"0.06em"}}>PWR vs {pitcherHand}HP</span>
+                  <span style={{fontSize:12,fontWeight:800,color:pwr>=70?C.warn:pwr>=50?C.gold:C.green}}>
+                    {batterStatsLoading?"…":pwr!=null?pwr:"N/A"}
+                  </span>
+                </div>
+                <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                  <span style={{fontSize:9,fontWeight:700,color:C.textSoft,textTransform:"uppercase",letterSpacing:"0.06em"}}>{conLabel} vs {pitcherHand}HP</span>
+                  <span style={{fontSize:12,fontWeight:800,color:con>=70?C.warn:con>=50?C.gold:C.green}}>
+                    {batterStatsLoading?"…":con!=null?con:"N/A"}
+                  </span>
+                </div>
+                {runnersInScoring&&<span style={{fontSize:9,fontWeight:700,color:C.gold,alignSelf:"center"}}>RISP</span>}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1705,18 +1709,24 @@ const S={
   emptyState:{color:C.textSoft,fontSize:13,textAlign:"center",padding:48,fontWeight:500},
 };
 
+
 // ─── Login Screen ─────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}) {
-  const [username, setUsername] = useState("");
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState("");
+  const [username,setUsername]=useState("");
+  const [pin,setPin]=useState("");
+  const [error,setError]=useState("");
+  const [checking,setChecking]=useState(false);
 
-  const handleSubmit = () => {
-    if (username.trim().length < 2) { setError("Username must be at least 2 characters."); return; }
-    if (pin.length < 4) { setError("PIN must be at least 4 digits."); return; }
-    if (!/^\d+$/.test(pin)) { setError("PIN must be numbers only."); return; }
-    const user = storeUser(username, pin);
-    onLogin(user);
+  const handleSubmit=async()=>{
+    const trimmed=username.toLowerCase().trim();
+    if(trimmed.length<2){setError("Username must be at least 2 characters.");return;}
+    if(pin.length<4){setError("PIN must be at least 4 digits.");return;}
+    if(!/^\d+$/.test(pin)){setError("PIN must be numbers only.");return;}
+    setChecking(true);setError("");
+    const result=await validateUser(trimmed,pin);
+    setChecking(false);
+    if(!result.ok){setError("Incorrect PIN for that username.");return;}
+    onLogin(storeUser(trimmed,pin));
   };
 
   return(
@@ -1737,21 +1747,22 @@ function LoginScreen({onLogin}) {
             <div style={{fontSize:11,fontWeight:700,color:"#8a9e93",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:6}}>PIN (4+ digits)</div>
             <input value={pin} onChange={e=>setPin(e.target.value)} placeholder="e.g. 1234" type="password" inputMode="numeric"
               style={{width:"100%",padding:"10px 12px",border:"1.5px solid #d8d4ca",borderRadius:8,fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
-            <div style={{fontSize:11,color:"#8a9e93",marginTop:5,fontWeight:500}}>Remember your PIN -- it protects your history.</div>
+            <div style={{fontSize:11,color:"#8a9e93",marginTop:5,fontWeight:500}}>Remember your PIN — it protects your history.</div>
           </div>
           {error&&<div style={{fontSize:12,color:"#b5451b",fontWeight:600,marginBottom:12}}>{error}</div>}
-          <button onClick={handleSubmit} style={{width:"100%",padding:"14px",background:"#2d6a4f",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
-            Get Started
+          <button onClick={handleSubmit} disabled={checking} style={{width:"100%",padding:"14px",background:"#2d6a4f",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit",opacity:checking?0.6:1}}>
+            {checking?"Checking...":"Get Started"}
           </button>
         </div>
         <div style={{textAlign:"center",marginTop:12,fontSize:11,color:"#8a9e93",fontWeight:500}}>
-          Same username + PIN = same history, any device
+          Same username + PIN on any device = same history
         </div>
       </div>
     </div>
   );
 }
 
+// ─── History Tab ──────────────────────────────────────────────────────────────
 function HistoryTab({user}) {
   const [games,setGames]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -1861,6 +1872,7 @@ function HistoryTab({user}) {
   </div>);
 }
 
+// ─── App ──────────────────────────────────────────────────────────────────────
 function App(){
   const [tab,setTab]=useState("setup");
   const [session,setSession]=useState(null);
@@ -1916,8 +1928,8 @@ function App(){
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
   const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"},{id:"history",label:"History"}];
 
-  // Show login screen AFTER all hooks
-  if (!user) return <LoginScreen onLogin={setUser}/>;
+  if(!user) return <LoginScreen onLogin={setUser}/>;
+
   return(
     <div style={S.root}>
       <div style={S.header}>
@@ -1957,6 +1969,7 @@ function App(){
           </div>
         </div>
       </div>
+
       {showScorePrompt&&(<div style={{background:C.white,borderBottom:`2px solid ${C.border}`,padding:"12px 16px"}}>
         <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:8}}>Half-inning over — runs scored?</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
@@ -1973,9 +1986,11 @@ function App(){
         </div>
         <button onClick={handleScoreSubmit} style={{...S.primaryBtn}}>Continue →</button>
       </div>)}
+
       <div style={S.tabBar}>
         {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={tab===t.id?S.tabOn:S.tabOff}>{t.label}</button>))}
       </div>
+
       <div style={S.content}>
         {tab==="setup"&&<SetupTab onComplete={handleSetup}/>}
         {tab==="atbat"&&(session
