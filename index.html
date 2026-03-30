@@ -154,12 +154,12 @@ async function searchBatters(query) {
   if (!data) return [];
   return (data.listings || [])
     .map(l => l.item || l)
-    .filter(c => c.is_hitter === 1)
+    .filter(c => c.is_hitter === true || c.is_hitter === 1)
     .map(c => ({
       name: c.name,
-      team: c.team || "",
+      team: c.team_short_name || c.team || "",
       bat: c.bat_hand || "R",
-      ovr: c.ovr || 0,
+      ovr: c.ovr || c.new_rank || 0,
       rarity: c.rarity || "",
       series: c.series || "",
       speed: c.speed || 50,
