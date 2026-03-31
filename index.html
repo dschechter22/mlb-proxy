@@ -1897,29 +1897,95 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
         <div style={{marginBottom:12}}>
           <div style={S.sectionLabel}>Select Pitch</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-            {scored.map(p=>(
-              <button key={p.type} onClick={()=>setSelectedPitch(p.type)} style={{
-                padding:"7px 11px",borderRadius:7,fontFamily:"'Nunito',sans-serif",
-                border:`1.5px solid ${selectedPitch===p.type?C.greenMid:C.border}`,
-                background:selectedPitch===p.type?C.greenDim:C.white,
-                color:selectedPitch===p.type?C.green:C.textMid,
-                fontSize:12,fontWeight:700,cursor:"pointer",
-              }}>
-                {p.type} <span style={{fontWeight:500,fontSize:10,opacity:0.7}}>{p.score}</span>
-              </button>
-            ))}
+            {scored.map(p=>{
+              const mv=getMovement(p.type,p.velo,pitcherHand);
+              // Map movement to dot position in 20x20 SVG
+              // h: -20..+20in maps to x:2..18, v: -15..+20in maps to y:18..2 (flipped)
+              const dotX=Math.round(10+(mv.h/20)*8);
+              const dotY=Math.round(10-(mv.v/20)*8);
+              const cx=Math.min(18,Math.max(2,dotX));
+              const cy=Math.min(18,Math.max(2,dotY));
+              const isActive=selectedPitch===p.type;
+              return(
+                <button key={p.type} onClick={()=>setSelectedPitch(p.type)} style={{
+                  padding:"5px 8px",borderRadius:7,fontFamily:"'Neuton','Nunito',serif",
+                  border:`1.5px solid ${isActive?C.greenMid:C.border}`,
+                  background:isActive?C.greenDim:C.white,
+                  color:isActive?C.green:C.textMid,
+                  fontSize:11,fontWeight:700,cursor:"pointer",
+                  display:"flex",alignItems:"center",gap:5,
+                }}>
+                  <svg width="18" height="18" viewBox="0 0 20 20" style={{flexShrink:0}}>
+                    <rect x="0" y="0" width="20" height="20" rx="3" fill={isActive?"rgba(45,106,79,0.1)":"rgba(0,0,0,0.04)"}/>
+                    {/* strike zone outline */}
+                    <rect x="5" y="5" width="10" height="10" fill="none" stroke={isActive?C.greenMid:C.border} strokeWidth="0.8"/>
+                    {/* center cross */}
+                    <line x1="10" y1="5" x2="10" y2="15" stroke={isActive?C.greenMid:C.border} strokeWidth="0.4"/>
+                    <line x1="5" y1="10" x2="15" y2="10" stroke={isActive?C.greenMid:C.border} strokeWidth="0.4"/>
+                    {/* movement dot */}
+                    <circle cx={cx} cy={cy} r="2.5" fill={isActive?C.green:C.textMid} opacity="0.9"/>
+                  </svg>
+                  <div>
+                    <div style={{lineHeight:1.1}}>{p.type}</div>
+                    <div style={{fontSize:9,opacity:0.6,fontWeight:500}}>{p.score}</div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {/* Zone grid */}
         <div style={{marginBottom:12}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <div style={S.sectionLabel}>Location 🔵=target</div>
-            {selectedZone&&<span style={{fontSize:11,color:C.green,fontWeight:700}}>🟢 {zoneLabel(selectedZone)}</span>}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+            <div style={S.sectionLabel}>Location</div>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <span style={{fontSize:10,color:C.blue,fontWeight:700}}>🔵 Target</span>
+              {selectedZone&&<span style={{fontSize:11,color:C.green,fontWeight:700}}>🟢 {zoneLabel(selectedZone)}</span>}
+            </div>
           </div>
-          <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:10}}>
-            <ZoneGrid onSelect={setSelectedZone} selected={selectedZone} recommended={recZone}/>
-            {!selectedZone&&<div style={{color:C.textSoft,fontSize:11,textAlign:"center",marginTop:6,fontWeight:500}}>Tap where you threw it</div>}
+          {/* Pitcher hand label above */}
+          <div style={{textAlign:"center",fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:3}}>
+            {pitcherHand==="L"?"← LHP":"RHP →"}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            {/* Batter hand label left */}
+            <div style={{
+              writingMode:"vertical-rl",transform:"rotate(180deg)",
+              fontSize:9,fontWeight:700,color:C.textMid,
+              background:C.greenDim,border:`1px solid ${C.greenMid}`,borderRadius:4,
+              padding:"6px 3px",letterSpacing:"0.05em",whiteSpace:"nowrap",
+            }}>
+              {effectiveBatterHand==="L"?"LHB":"RHB"}
+            </div>
+            {/* Zone grid with pitch trail */}
+            <div style={{flex:1,background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:8,position:"relative"}}>
+              <ZoneGridWithTrail
+                onSelect={setSelectedZone}
+                selected={selectedZone}
+                recommended={recZone}
+                pitchType={activePitch?.type}
+                pitcherHand={pitcherHand}
+                batterHand={effectiveBatterHand}
+                velo={activePitch?.velo}
+              />
+              {!selectedZone&&<div style={{color:C.textSoft,fontSize:11,textAlign:"center",marginTop:4,fontWeight:500}}>Tap where you threw it</div>}
+            </div>
+            {/* Batter stand side indicator */}
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,width:18}}>
+              {effectiveBatterHand==="R"?(
+                <div style={{fontSize:16,lineHeight:1}}>🏏</div>
+              ):(
+                <div style={{fontSize:16,lineHeight:1,transform:"scaleX(-1)"}}>🏏</div>
+              )}
+              <div style={{fontSize:7,fontWeight:700,color:C.textSoft,textAlign:"center"}}>
+                {effectiveBatterHand==="R"?"R":"L"}
+              </div>
+            </div>
+          </div>
+          {/* Catcher's view label below */}
+          <div style={{textAlign:"center",fontSize:9,fontWeight:600,color:C.textSoft,marginTop:3}}>
+            📷 Catcher's view · {effectiveBatterHand==="R"?"Batter on left":"Batter on right"}
           </div>
         </div>
 
