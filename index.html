@@ -534,13 +534,18 @@ function ZoneGrid({onSelect,selected,recommended}){
 }
 
 // ─── Lineup Setup ─────────────────────────────────────────────────────────────
-function LineupSetup({onSave}){
+function LineupSetup({onSave,initialLineup}){
   const [query,setQuery]=useState("");
-  const [lineup,setLineup]=useState(Array(9).fill(null).map(()=>({name:"",bat:"R",custom:false})));
+  const [lineup,setLineup]=useState(()=>
+    initialLineup&&initialLineup.some(b=>b.name)
+      ? initialLineup
+      : Array(9).fill(null).map(()=>({name:"",bat:"R",custom:false}))
+  );
   const [activeSlot,setActiveSlot]=useState(null);
   const [apiResults,setApiResults]=useState([]);
   const [apiLoading,setApiLoading]=useState(false);
   const [autoFilling,setAutoFilling]=useState(false);
+  const [saved,setSaved]=useState(false);
 
   useEffect(()=>{
     if(query.length<2){setApiResults([]);return;}
@@ -642,7 +647,12 @@ function LineupSetup({onSave}){
           )}
         </div>
       ))}
-      <button onClick={()=>canSave&&onSave(lineup)} style={{...S.primaryBtn,opacity:canSave?1:0.4,marginTop:8}} disabled={!canSave}>
+      {saved&&(
+        <div style={{background:C.greenLight,border:`1.5px solid ${C.greenMid}`,borderRadius:8,padding:"10px 14px",marginTop:8,fontSize:12,fontWeight:700,color:C.green}}>
+          ✓ Lineup saved — tap Start Game when ready
+        </div>
+      )}
+      <button onClick={()=>{if(!canSave) return;setSaved(true);onSave(lineup);}} style={{...S.primaryBtn,opacity:canSave?1:0.4,marginTop:8}} disabled={!canSave}>
         Save Lineup
       </button>
     </div>
@@ -887,7 +897,7 @@ function SetupTab({onComplete,onViewStats}){
 
       {view==="lineup"&&(
         <div>
-          <LineupSetup onSave={saved=>{setLineup(saved);}}/>
+          <LineupSetup initialLineup={lineup} onSave={saved=>{setLineup(saved);setView("pitcher");}}/>
           {startGameBtn}
         </div>
       )}
@@ -930,7 +940,7 @@ function getFullReason(lastPitch,lastZone,recPitch,recZone,score){
 }
 
 // ─── At-Bat Tab ───────────────────────────────────────────────────────────────
-function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,onEndGame,onUndo,onSetBalls,onSetStrikes}){
+function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,onEndGame,onUndo,onSetBalls,onSetStrikes,onAddRun}){
   const{pitcherHand,pitches,sequence,outcomes,gameLog,lineup,batterIdx,outs,inning,bases}=session;
   const balls=session.balls||0;
   const strikes=session.strikes||0;
@@ -1183,6 +1193,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       if(next) nb[next]={name:runner.name,fast:false};
       // from second or third with adv2 = scores
     } else if(dest==="scored"){
+      onAddRun(1);
       // runner removed, already cleared above
     } else {
       // stayed -- put back
@@ -1284,6 +1295,9 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
     // Place batter on base
     const newBases={...cb};
     if(result==="hr"){
+      // Count batter + all occupied runners as runs
+      const runsScored=1+occupied.length;
+      onAddRun(runsScored);
       onUpdateBases({first:null,second:null,third:null});
       resetContactFlow();advanceNext();return;
     }
@@ -1303,18 +1317,18 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
     const runner=runnersToScore[runnerScoringIdx];
     const cb=session.bases||{first:null,second:null,third:null};
     const nb={...cb};
-    nb[runner.base]=null; // remove from current base
+    nb[runner.base]=null;
     if(dest==="stayed"){
-      nb[runner.base]={name:runner.name,fast:false}; // put back
+      nb[runner.base]={name:runner.name,fast:false};
     } else if(dest==="adv1"){
       const next={first:"second",second:"third",third:null}[runner.base];
       if(next) nb[next]={name:runner.name,fast:false};
     } else if(dest==="adv2"){
       const next={first:"third",second:null,third:null}[runner.base];
       if(next) nb[next]={name:runner.name,fast:false};
-      // from second or third adv2 = scores (already cleared)
+    } else if(dest==="scored"){
+      onAddRun(1);
     }
-    // dest==="scored" => runner cleared, already done above
     onUpdateBases(nb);
     const nextIdx=runnerScoringIdx+1;
     if(nextIdx>=runnersToScore.length){resetContactFlow();advanceNext();}
@@ -1819,7 +1833,78 @@ function LineupTab({session}){
           <div style={S.emptyState}>No pitches logged for this batter yet.</div>
         ):(
           <>
-            <div style={S.sectionLabel}>Pitch Chart</div>
+            {/* Zone heatmap with batter silhouette */}
+            <div style={S.sectionLabel}>Zone Chart</div>
+            <div style={{...S.card,marginBottom:12,padding:"10px 8px"}}>
+              {(()=>{
+                const isLHB=batter?.bat==="L"||batter?.bat==="S";
+                const zoneMap={};
+                log.forEach(e=>{
+                  if(!e.zone) return;
+                  if(!zoneMap[e.zone]) zoneMap[e.zone]={total:0,outs:0,hits:0};
+                  zoneMap[e.zone].total++;
+                  if(e.isOut) zoneMap[e.zone].outs++;
+                  if(e.onBase) zoneMap[e.zone].hits++;
+                });
+                const maxZ=Math.max(1,...Object.values(zoneMap).map(z=>z.total));
+
+                // Batter silhouette SVG (simplified standing figure)
+                const silhouette=(
+                  <svg width="28" height="80" viewBox="0 0 28 80" style={{flexShrink:0}}>
+                    {/* head */}
+                    <circle cx="14" cy="9" r="7" fill="rgba(45,106,79,0.25)" stroke="rgba(45,106,79,0.5)" strokeWidth="1.2"/>
+                    {/* body */}
+                    <rect x="8" y="17" width="12" height="26" rx="3" fill="rgba(45,106,79,0.2)" stroke="rgba(45,106,79,0.4)" strokeWidth="1.2"/>
+                    {/* legs */}
+                    <rect x="8" y="41" width="5" height="22" rx="2" fill="rgba(45,106,79,0.2)" stroke="rgba(45,106,79,0.4)" strokeWidth="1"/>
+                    <rect x="15" y="41" width="5" height="22" rx="2" fill="rgba(45,106,79,0.2)" stroke="rgba(45,106,79,0.4)" strokeWidth="1"/>
+                    {/* bat arm */}
+                    {isLHB
+                      ? <line x1="20" y1="24" x2="27" y2="4" stroke="rgba(181,129,27,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
+                      : <line x1="8" y1="24" x2="1" y2="4" stroke="rgba(181,129,27,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
+                    }
+                  </svg>
+                );
+
+                return(
+                  <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>
+                    {/* Silhouette left side for LHB */}
+                    {isLHB&&silhouette}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2,flex:"0 0 auto",width:160}}>
+                      {Array.from({length:25},(_,idx)=>{
+                        const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
+                        const z=zoneMap[id],inZ=row>=1&&row<=3&&col>=1&&col<=3;
+                        const hitPct=z?Math.round((z.hits/z.total)*100):0;
+                        const outPct=z?Math.round((z.outs/z.total)*100):0;
+                        const bg=z
+                          ? z.hits>z.outs
+                            ? `rgba(181,69,27,${0.15+(z.hits/z.total)*0.7})`  // red = danger zone
+                            : `rgba(45,106,79,${0.15+(z.outs/z.total)*0.7})`  // green = out zone
+                          : inZ?C.white:C.surface;
+                        return(
+                          <div key={id} style={{height:34,borderRadius:4,background:bg,
+                            border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",
+                            alignItems:"center",justifyContent:"center"}}>
+                            {z&&<>
+                              <span style={{fontSize:9,fontWeight:800,color:"#fff",lineHeight:1}}>{z.total}</span>
+                              <span style={{fontSize:7,color:"rgba(255,255,255,0.8)",lineHeight:1}}>{hitPct}%H</span>
+                            </>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Silhouette right side for RHB */}
+                    {!isLHB&&silhouette}
+                  </div>
+                );
+              })()}
+              <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:8}}>
+                <span style={{fontSize:9,fontWeight:700,color:"rgba(181,69,27,0.9)"}}>🔴 Danger (hits)</span>
+                <span style={{fontSize:9,fontWeight:700,color:C.green}}>🟢 Out zone</span>
+              </div>
+            </div>
+
+            <div style={S.sectionLabel}>Pitch Log</div>
             <div style={{...S.card,padding:"10px 8px"}}>
               {log.map((e,i)=>{
                 const col=PITCH_COLORS[e.pitch]||C.textMid;
@@ -2010,14 +2095,32 @@ function LoginScreen({onLogin}){
   );
 }
 
+class StatsErrorBoundary extends React.Component{
+  constructor(p){super(p);this.state={error:null};}
+  static getDerivedStateFromError(e){return{error:e};}
+  render(){
+    if(this.state.error){
+      return(
+        <div style={{padding:"24px 16px",textAlign:"center"}}>
+          <div style={{fontSize:14,fontWeight:800,color:"#b5451b",marginBottom:8}}>Stats failed to load</div>
+          <div style={{fontSize:12,color:"#8a9e93",marginBottom:16}}>{String(this.state.error.message||this.state.error)}</div>
+          <button onClick={()=>{this.setState({error:null});if(this.props.onBack) this.props.onBack();}}
+            style={{padding:"10px 20px",background:"#2d6a4f",color:"#fff",border:"none",borderRadius:8,fontFamily:"'Nunito',sans-serif",fontWeight:700,cursor:"pointer"}}>
+            ← Go Back
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function StatsTab({user,onBack}){
   const [allLog,setAllLog]=useState([]);
   const [loading,setLoading]=useState(true);
   const [view,setView]=useState("pitcher");
   const [selected,setSelected]=useState(null);
   useEffect(()=>{loadAllPitchLog(user).then(d=>{setAllLog(d);setLoading(false);});},[user]);
-
-  const pct=(n,d)=>d>0?Math.round((n/d)*100):0;
 
   const pitcherStats=useMemo(()=>{
     const map={};
@@ -2077,6 +2180,7 @@ function StatsTab({user,onBack}){
   },[allLog]);
 
   const VIEWS=[{id:"pitcher",label:"Pitcher"},{id:"batter",label:"Batters"},{id:"count",label:"Counts"},{id:"zone",label:"Zones"}];
+  const pct=(n,d)=>d>0?Math.round((n/d)*100):0;
 
   // Early returns AFTER all hooks
   if(loading) return(
@@ -2400,6 +2504,7 @@ function App(){
     if(!prev.lineup) return prev;
     const nl=[...prev.lineup];nl[slot]={name:nb.name,bat:nb.bat,custom:false};return{...prev,lineup:nl};
   }),[]);
+  const handleAddRun=useCallback((n=1)=>setSession(prev=>({...prev,myScore:prev.myScore+n})),[]);
   const handleUpdateBases=useCallback((b)=>setSession(prev=>({...prev,bases:b})),[]);
   const handleSaveGame=useCallback(async()=>{
     if(!session||saving) return;
@@ -2412,7 +2517,9 @@ function App(){
   },[session,user]);
 
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
-  const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"lineup",label:"Lineup"},{id:"log",label:"Log"},{id:"history",label:"History"}];
+  const TABS_NO_GAME=[{id:"setup",label:"Setup"},{id:"history",label:"History"}];
+  const TABS_IN_GAME=[{id:"atbat",label:"At-Bat"},{id:"lineup",label:"Lineup"},{id:"log",label:"Log"},{id:"history",label:"History"}];
+  const TABS=session?TABS_IN_GAME:TABS_NO_GAME;
 
   if(!user) return <LoginScreen onLogin={setUser}/>;
 
@@ -2480,7 +2587,7 @@ function App(){
       <div style={S.content}>
         {tab==="setup"&&<SetupTab onComplete={handleSetup} onViewStats={()=>setTab("stats")}/>}
         {tab==="atbat"&&(session
-          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame} onUndo={handleUndo} onSetBalls={handleSetBalls} onSetStrikes={handleSetStrikes}/>
+          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame} onUndo={handleUndo} onSetBalls={handleSetBalls} onSetStrikes={handleSetStrikes} onAddRun={handleAddRun}/>
           :<div style={S.emptyState}>Complete setup first.</div>
         )}
         {tab==="lineup"&&(session?<LineupTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
@@ -2496,7 +2603,7 @@ function App(){
           </div>
           :<div style={S.emptyState}>Complete setup first.</div>
         )}
-        {tab==="stats"&&<StatsTab user={user} onBack={()=>setTab("setup")}/>}
+        {tab==="stats"&&<StatsErrorBoundary onBack={()=>setTab(session?"atbat":"setup")}><StatsTab user={user} onBack={()=>setTab(session?"atbat":"setup")}/></StatsErrorBoundary>}
         {tab==="history"&&<HistoryTab user={user}/>}
       </div>
     </div>
