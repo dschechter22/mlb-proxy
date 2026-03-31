@@ -257,24 +257,51 @@ const RANDOM_NAMES = [
 const PITCHERS = [];   // unused -- DD card API only
 const MLB_BATTERS = []; // unused -- DD card API only
 
+const PITCHER_POSITIONS=new Set(["SP","RP","CL","MR"]);
+
 async function randomLineupFromApi(){
-  // Pick 9 random last names, fetch one result each, filter hitters
-  const shuffled=[...RANDOM_NAMES].sort(()=>Math.random()-0.5).slice(0,18);
+  const shuffled=[...RANDOM_NAMES].sort(()=>Math.random()-0.5).slice(0,20);
   const results=[];
   for(const name of shuffled){
     if(results.length>=9) break;
     try{
-      const data=await mlbFetch('/apis/listings.json?type=mlb_card&name='+encodeURIComponent(name));
-      const hitters=(data?.listings||[]).map(l=>l.item||l).filter(c=>c.is_hitter===true||c.is_hitter===1);
+      const data=await mlbFetch(`/apis/listings.json?type=mlb_card&name=${encodeURIComponent(name)}`);
+      const items=(data?.listings||[]).map(l=>l.item||l);
+      // Accept is_hitter===true/1, or display_position not a pitcher position
+      const hitters=items.filter(c=>{
+        if(c.is_hitter===true||c.is_hitter===1) return true;
+        if(c.is_hitter===false||c.is_hitter===0) return false;
+        return !PITCHER_POSITIONS.has(c.display_position);
+      });
       if(hitters.length>0){
         const pick=hitters[Math.floor(Math.random()*hitters.length)];
-        results.push({name:pick.name,bat:pick.bat_hand||'R',custom:false,ovr:pick.ovr||0,uuid:pick.uuid||''});
+        results.push({name:pick.name,bat:pick.bat_hand||"R",custom:false,ovr:pick.ovr||pick.new_rank||0,uuid:pick.uuid||""});
       }
     }catch(e){}
   }
-  // Pad with empty slots if needed
-  while(results.length<9) results.push({name:'',bat:'R',custom:false});
+  while(results.length<9) results.push({name:"",bat:"R",custom:false});
   return results;
+}
+
+async function randomPitcherFromApi(){
+  const shuffled=[...RANDOM_NAMES].sort(()=>Math.random()-0.5).slice(0,20);
+  for(const name of shuffled){
+    try{
+      const data=await mlbFetch(`/apis/listings.json?type=mlb_card&name=${encodeURIComponent(name)}`);
+      const items=(data?.listings||[]).map(l=>l.item||l);
+      const pitchers=items.filter(c=>c.is_hitter===false||c.is_hitter===0||PITCHER_POSITIONS.has(c.display_position));
+      if(pitchers.length>0){
+        const stub=pitchers[Math.floor(Math.random()*pitchers.length)];
+        // Fetch full item to get pitches
+        const full=await mlbFetch(`/apis/item.json?uuid=${stub.uuid}`);
+        if(full){
+          const pitchList=full.pitches?.pitches||[];
+          if(pitchList.length>=2) return apiCardToPitcher(full);
+        }
+      }
+    }catch(e){}
+  }
+  return null;
 }
 
 
@@ -648,6 +675,7 @@ function SetupTab({onComplete}){
   const [apiResults,setApiResults]=useState([]);
   const [apiLoading,setApiLoading]=useState(false);
   const [apiError,setApiError]=useState("");
+  const [autoGenning,setAutoGenning]=useState(false);
   const proxyReady = true;
 
   // All hooks must run before any early return
@@ -692,7 +720,22 @@ function SetupTab({onComplete}){
     setPitches(next);
   };
 
+  const autoGenPitcher=async()=>{
+    setAutoGenning(true);
+    const p=await randomPitcherFromApi();
+    if(p) selectPitcher(p);
+    setAutoGenning(false);
+  };
+
   const canStart=pitches.length>=2;
+
+  const startGameBtn=(
+    <button onClick={()=>canStart&&onComplete({pitcherHand,batterHand:effectiveBatterHand,pitches,lineup,batterIdx,setBatterIdx,pitcherName:selectedName||"Custom",pitcherOvr:apiResults.find(r=>r.name===selectedName)?.ovr||0,gameType:gameType.id,totalInnings:gameType.id==="event"?6:gameType.id==="br"?3:9})}
+      style={{...S.primaryBtn,opacity:canStart?1:0.4,margin:"12px 16px 0"}} disabled={!canStart}>
+      Start Game
+    </button>
+  );
+
   return(
     <div style={{padding:"0"}}>
       {/* Sub-tabs */}
@@ -711,9 +754,12 @@ function SetupTab({onComplete}){
           <div style={{marginBottom:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={S.label}>Pitcher Search</div>
-              <span style={{fontSize:10,fontWeight:700,color:apiError?C.warn:apiResults.length>0?C.green:C.textSoft}}>
-                {apiLoading?"Searching...":apiError?`⚠ ${apiError}`:apiResults.length>0?"🟢 DD cards":"⚪ Local DB"}
-              </span>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <button onClick={autoGenPitcher} disabled={autoGenning} style={{...S.ghostBtn,fontSize:10,padding:"3px 8px",opacity:autoGenning?0.5:1}}>{autoGenning?"Loading...":"🎲 Random"}</button>
+                <span style={{fontSize:10,fontWeight:700,color:apiError?C.warn:apiResults.length>0?C.green:C.textSoft}}>
+                  {apiLoading?"Searching...":apiError?`⚠ ${apiError}`:apiResults.length>0?"🟢 DD cards":"⚪ Search"}
+                </span>
+              </div>
             </div>
             <input value={query} onChange={e=>{setQuery(e.target.value);if(e.target.value!==selectedName)setSelectedName("");}}
               placeholder="Search name or card..." style={{...S.input,width:"100%",boxSizing:"border-box"}}/>
@@ -792,15 +838,15 @@ function SetupTab({onComplete}){
             </div>
           )}
 
-          <button onClick={()=>canStart&&onComplete({pitcherHand,batterHand:effectiveBatterHand,pitches,lineup,batterIdx,setBatterIdx,pitcherName:selectedName||"Custom",pitcherOvr:apiResults.find(r=>r.name===selectedName)?.ovr||0,gameType:gameType.id,totalInnings:gameType.id==="event"?6:9})}
-            style={{...S.primaryBtn,opacity:canStart?1:0.4}} disabled={!canStart}>
-            Start Game
-          </button>
+          {startGameBtn}
         </div>
       )}
 
       {view==="lineup"&&(
-        <LineupSetup onSave={saved=>{setLineup(saved);setView("pitcher");}}/>
+        <div>
+          <LineupSetup onSave={saved=>{setLineup(saved);}}/>
+          {startGameBtn}
+        </div>
       )}
     </div>
   );
