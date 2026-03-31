@@ -240,181 +240,43 @@ async function searchBatters(query) {
 
 
 // ─── MLB Batter Database (2026 rosters, handedness) ───────────────────────────
-const MLB_BATTERS = [
-  // AL East
-  {name:"Aaron Judge",team:"NYY",bat:"R"},{name:"Juan Soto",team:"NYY",bat:"L"},{name:"Gleyber Torres",team:"NYY",bat:"R"},
-  {name:"Anthony Volpe",team:"NYY",bat:"R"},{name:"Jazz Chisholm",team:"NYY",bat:"L"},{name:"Giancarlo Stanton",team:"NYY",bat:"R"},
-  {name:"Cody Bellinger",team:"NYY",bat:"L"},{name:"Paul Goldschmidt",team:"NYY",bat:"R"},
-  {name:"Rafael Devers",team:"BOS",bat:"L"},{name:"Triston Casas",team:"BOS",bat:"L"},{name:"Jarren Duran",team:"BOS",bat:"L"},
-  {name:"Trevor Story",team:"BOS",bat:"R"},{name:"Rob Refsnyder",team:"BOS",bat:"R"},{name:"Connor Wong",team:"BOS",bat:"R"},
-  {name:"Vladimir Guerrero Jr.",team:"TOR",bat:"R"},{name:"Bo Bichette",team:"TOR",bat:"R"},{name:"George Springer",team:"TOR",bat:"R"},
-  {name:"Daulton Varsho",team:"TOR",bat:"L"},{name:"Ernie Clement",team:"TOR",bat:"R"},{name:"Kazuma Okamoto",team:"TOR",bat:"R"},
-  {name:"Gunnar Henderson",team:"BAL",bat:"L"},{name:"Adley Rutschman",team:"BAL",bat:"S"},{name:"Anthony Santander",team:"BAL",bat:"S"},
-  {name:"Ryan Mountcastle",team:"BAL",bat:"R"},{name:"Cedric Mullins",team:"BAL",bat:"L"},{name:"Jorge Mateo",team:"BAL",bat:"R"},
-  {name:"Jose Ramirez",team:"CLE",bat:"S"},{name:"Steven Kwan",team:"CLE",bat:"L"},{name:"Josh Naylor",team:"CLE",bat:"L"},
-  {name:"Bo Naylor",team:"CLE",bat:"L"},{name:"Lane Thomas",team:"CLE",bat:"R"},{name:"David Fry",team:"CLE",bat:"S"},
-  // AL Central
-  {name:"Bobby Witt Jr.",team:"KC",bat:"R"},{name:"Salvador Perez",team:"KC",bat:"R"},{name:"Michael Massey",team:"KC",bat:"L"},
-  {name:"MJ Melendez",team:"KC",bat:"L"},{name:"Vinnie Pasquantino",team:"KC",bat:"L"},
-  {name:"Corey Seager",team:"TEX",bat:"L"},{name:"Marcus Semien",team:"TEX",bat:"R"},{name:"Wyatt Langford",team:"TEX",bat:"R"},
-  {name:"Jonah Heim",team:"TEX",bat:"S"},{name:"Adolis Garcia",team:"TEX",bat:"R"},
-  {name:"Riley Greene",team:"DET",bat:"L"},{name:"Spencer Torkelson",team:"DET",bat:"R"},{name:"Kerry Carpenter",team:"DET",bat:"L"},
-  {name:"Matt Vierling",team:"DET",bat:"R"},{name:"Parker Meadows",team:"DET",bat:"L"},
-  {name:"Luis Robert Jr.",team:"CWS",bat:"R"},{name:"Andrew Vaughn",team:"CWS",bat:"R"},{name:"Gavin Sheets",team:"CWS",bat:"L"},
-  {name:"Munetaka Murakami",team:"CWS",bat:"R"},
-  {name:"Byron Buxton",team:"MIN",bat:"R"},{name:"Carlos Correa",team:"MIN",bat:"R"},{name:"Ryan Jeffers",team:"MIN",bat:"R"},
-  {name:"Royce Lewis",team:"MIN",bat:"R"},{name:"Max Kepler",team:"MIN",bat:"L"},
-  // AL West
-  {name:"Yordan Alvarez",team:"HOU",bat:"L"},{name:"Alex Bregman",team:"HOU",bat:"R"},{name:"Jose Altuve",team:"HOU",bat:"R"},
-  {name:"Kyle Tucker",team:"HOU",bat:"L"},{name:"Jeremy Pena",team:"HOU",bat:"R"},
-  {name:"Julio Rodriguez",team:"SEA",bat:"R"},{name:"Cal Raleigh",team:"SEA",bat:"S"},{name:"Mitch Garver",team:"SEA",bat:"R"},
-  {name:"Ty France",team:"SEA",bat:"R"},{name:"Josh Bell",team:"SEA",bat:"S"},
-  {name:"Shohei Ohtani",team:"LAA",bat:"L"},{name:"Mike Trout",team:"LAA",bat:"R"},{name:"Anthony Rendon",team:"LAA",bat:"R"},
-  {name:"Logan O'Hoppe",team:"LAA",bat:"R"},{name:"Taylor Ward",team:"LAA",bat:"R"},
-  {name:"Brent Rooker",team:"OAK",bat:"R"},{name:"Lawrence Butler",team:"OAK",bat:"L"},{name:"Nick Allen",team:"OAK",bat:"R"},
-  {name:"Zack Gelof",team:"OAK",bat:"R"},
-  {name:"Nathaniel Lowe",team:"TEX",bat:"L"},{name:"Josh Jung",team:"TEX",bat:"R"},
-  // NL East
-  {name:"Bryce Harper",team:"PHI",bat:"L"},{name:"Trea Turner",team:"PHI",bat:"R"},{name:"Kyle Schwarber",team:"PHI",bat:"L"},
-  {name:"Nick Castellanos",team:"PHI",bat:"R"},{name:"J.T. Realmuto",team:"PHI",bat:"R"},{name:"Alec Bohm",team:"PHI",bat:"R"},
-  {name:"Francisco Lindor",team:"NYM",bat:"S"},{name:"Pete Alonso",team:"NYM",bat:"R"},{name:"Jeff McNeil",team:"NYM",bat:"L"},
-  {name:"Brandon Nimmo",team:"NYM",bat:"L"},{name:"Mark Vientos",team:"NYM",bat:"R"},{name:"Harrison Bader",team:"NYM",bat:"R"},
-  {name:"Ronald Acuna Jr.",team:"ATL",bat:"R"},{name:"Austin Riley",team:"ATL",bat:"R"},{name:"Ozzie Albies",team:"ATL",bat:"S"},
-  {name:"Matt Olson",team:"ATL",bat:"L"},{name:"Michael Harris II",team:"ATL",bat:"L"},{name:"Sean Murphy",team:"ATL",bat:"R"},
-  {name:"Juan Soto",team:"NYY",bat:"L"},{name:"Rhys Hoskins",team:"MIL",bat:"R"},
-  {name:"Jazz Chisholm Jr.",team:"NYY",bat:"L"},{name:"Starling Marte",team:"NYM",bat:"R"},
-  {name:"CJ Abrams",team:"WSH",bat:"L"},{name:"Joey Meneses",team:"WSH",bat:"R"},{name:"Keibert Ruiz",team:"WSH",bat:"S"},
-  {name:"Jesse Winker",team:"WSH",bat:"L"},
-  {name:"Jesper Nootbaar",team:"STL",bat:"L"},{name:"Paul DeJong",team:"STL",bat:"R"},
-  // NL Central
-  {name:"Elly De La Cruz",team:"CIN",bat:"S"},{name:"Tyler Stephenson",team:"CIN",bat:"R"},{name:"Jonathan India",team:"CIN",bat:"R"},
-  {name:"Spencer Steer",team:"CIN",bat:"R"},{name:"TJ Friedl",team:"CIN",bat:"L"},
-  {name:"Ian Happ",team:"CHC",bat:"S"},{name:"Dansby Swanson",team:"CHC",bat:"R"},{name:"Seiya Suzuki",team:"CHC",bat:"R"},
-  {name:"Cody Bellinger",team:"CHC",bat:"L"},{name:"Nico Hoerner",team:"CHC",bat:"R"},
-  {name:"William Contreras",team:"MIL",bat:"R"},{name:"Christian Yelich",team:"MIL",bat:"L"},{name:"Sal Frelick",team:"MIL",bat:"L"},
-  {name:"Jackson Chourio",team:"MIL",bat:"R"},{name:"Willy Adames",team:"MIL",bat:"R"},
-  {name:"Paul Goldschmidt",team:"STL",bat:"R"},{name:"Nolan Arenado",team:"STL",bat:"R"},{name:"Lars Nootbaar",team:"STL",bat:"L"},
-  {name:"Brendan Donovan",team:"STL",bat:"L"},
-  {name:"Ke'Bryan Hayes",team:"PIT",bat:"R"},{name:"Oneil Cruz",team:"PIT",bat:"L"},{name:"Connor Joe",team:"PIT",bat:"R"},
-  {name:"Andrew McCutchen",team:"PIT",bat:"R"},
-  // NL West
-  {name:"Mookie Betts",team:"LAD",bat:"R"},{name:"Freddie Freeman",team:"LAD",bat:"L"},{name:"Will Smith",team:"LAD",bat:"R"},
-  {name:"Teoscar Hernandez",team:"LAD",bat:"R"},{name:"Max Muncy",team:"LAD",bat:"L"},{name:"Andy Pages",team:"LAD",bat:"R"},
-  {name:"Fernando Tatis Jr.",team:"SD",bat:"R"},{name:"Xander Bogaerts",team:"SD",bat:"R"},{name:"Jake Cronenworth",team:"SD",bat:"L"},
-  {name:"Luis Arraez",team:"SD",bat:"L"},{name:"Jackson Merrill",team:"SD",bat:"L"},
-  {name:"Ketel Marte",team:"ARI",bat:"S"},{name:"Corbin Carroll",team:"ARI",bat:"L"},{name:"Gabriel Moreno",team:"ARI",bat:"R"},
-  {name:"Christian Walker",team:"ARI",bat:"R"},{name:"Lourdes Gurriel Jr.",team:"ARI",bat:"R"},
-  {name:"Matt Chapman",team:"SF",bat:"R"},{name:"Heliot Ramos",team:"SF",bat:"R"},{name:"Tyler Fitzgerald",team:"SF",bat:"R"},
-  {name:"Patrick Bailey",team:"SF",bat:"S"},{name:"Michael Conforto",team:"SF",bat:"L"},
-  {name:"Ryan McMahon",team:"COL",bat:"L"},{name:"Ezequiel Tovar",team:"COL",bat:"R"},{name:"Charlie Blackmon",team:"COL",bat:"L"},
-  {name:"Brenton Doyle",team:"COL",bat:"R"},
-  {name:"Christian Yelich",team:"MIL",bat:"L"},{name:"Jake Burger",team:"MIA",bat:"R"},{name:"Luis Arraez",team:"MIA",bat:"L"},
-  {name:"Jazz Chisholm",team:"MIA",bat:"L"},{name:"Jorge Soler",team:"ATL",bat:"R"},
+// ─── DD card only -- no local database ───────────────────────────────────────
+// Random last names used for auto-fill lineup via API search
+const RANDOM_NAMES = [
+  'Smith','Johnson','Williams','Jones','Brown','Davis','Miller','Wilson','Moore','Taylor',
+  'Anderson','Thomas','Jackson','White','Harris','Martin','Garcia','Martinez','Robinson','Clark',
+  'Rodriguez','Lewis','Lee','Walker','Hall','Allen','Young','Hernandez','King','Wright',
+  'Lopez','Hill','Scott','Green','Adams','Baker','Gonzalez','Nelson','Carter','Mitchell',
+  'Perez','Roberts','Turner','Phillips','Campbell','Parker','Evans','Edwards','Collins','Stewart',
+  'Ramirez','Sanchez','Morris','Rogers','Reed','Cook','Morgan','Bell','Murphy','Bailey',
+  'Rivera','Cooper','Richardson','Cox','Howard','Ward','Torres','Peterson','Gray','Ramirez',
+  'James','Watson','Brooks','Kelly','Sanders','Price','Bennett','Wood','Barnes','Ross',
+  'Henderson','Coleman','Jenkins','Perry','Powell','Long','Patterson','Hughes','Flores','Washington',
 ];
 
-// ─── Pitcher Database (2026 rosters) ─────────────────────────────────────────
-const PITCHERS = [
-  // SP - AL East
-  {name:"Gerrit Cole",team:"NYY",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:88},{type:"Sweeper",velo:84},{type:"Changeup",velo:88},{type:"Curveball",velo:80}]},
-  {name:"Max Fried",team:"NYY",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Curveball",velo:78},{type:"Changeup",velo:84},{type:"Sinker",velo:92},{type:"Slider",velo:83}]},
-  {name:"Garrett Crochet",team:"BOS",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Changeup",velo:86}]},
-  {name:"Kevin Gausman",team:"TOR",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Splitter",velo:84},{type:"Slider",velo:83},{type:"Cutter",velo:88}]},
-  {name:"Chris Sale",team:"ATL",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:80},{type:"Changeup",velo:82},{type:"Cutter",velo:87}]},
-  {name:"Corbin Burnes",team:"BAL",hand:"R",role:"SP",pitches:[{type:"Cutter",velo:93},{type:"Sinker",velo:93},{type:"Curveball",velo:80},{type:"Changeup",velo:86},{type:"4-Seam FB",velo:94}]},
-  // SP - AL Central
-  {name:"Tarik Skubal",team:"DET",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Changeup",velo:85},{type:"Slider",velo:84},{type:"Curveball",velo:76}]},
-  {name:"Hunter Brown",team:"HOU",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Curveball",velo:79},{type:"Changeup",velo:87}]},
-  {name:"Cole Ragans",team:"KC",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:84},{type:"Curveball",velo:77},{type:"Changeup",velo:85}]},
-  {name:"Joe Ryan",team:"MIN",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Slider",velo:84},{type:"Changeup",velo:83},{type:"Curveball",velo:76}]},
-  // SP - AL West
-  {name:"Luis Castillo",team:"SEA",hand:"R",role:"SP",pitches:[{type:"Sinker",velo:96},{type:"Slider",velo:87},{type:"Changeup",velo:87},{type:"4-Seam FB",velo:96}]},
-  {name:"George Kirby",team:"SEA",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Slider",velo:85},{type:"Sinker",velo:93},{type:"Changeup",velo:86},{type:"Cutter",velo:89}]},
-  {name:"Jose Soriano",team:"LAA",hand:"R",role:"SP",pitches:[{type:"Sinker",velo:99},{type:"Slider",velo:89},{type:"4-Seam FB",velo:99},{type:"Changeup",velo:88}]},
-  {name:"Luis Severino",team:"OAK",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:86},{type:"Changeup",velo:85},{type:"Curveball",velo:78}]},
-  // SP - NL East
-  {name:"Zack Wheeler",team:"PHI",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Sinker",velo:95},{type:"Slider",velo:87},{type:"Curveball",velo:80},{type:"Changeup",velo:87}]},
-  {name:"Aaron Nola",team:"PHI",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:91},{type:"Curveball",velo:74},{type:"Changeup",velo:81},{type:"Sinker",velo:90},{type:"Cutter",velo:87}]},
-  {name:"Kodai Senga",team:"NYM",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Splitter",velo:86},{type:"Slider",velo:86},{type:"Curveball",velo:78}]},
-  {name:"Freddie Peralta",team:"MIL",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Curveball",velo:78},{type:"Slider",velo:85},{type:"Changeup",velo:85}]},
-  {name:"Spencer Strider",team:"ATL",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:89},{type:"Changeup",velo:87}]},
-  // SP - NL Central
-  {name:"Paul Skenes",team:"PIT",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:100},{type:"Splitter",velo:88},{type:"Slider",velo:88},{type:"Curveball",velo:80}]},
-  {name:"Jacob Misiorowski",team:"MIL",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:88},{type:"Curveball",velo:79}]},
-  {name:"Matthew Liberatore",team:"STL",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Curveball",velo:76},{type:"Changeup",velo:83},{type:"Slider",velo:82}]},
-  {name:"Cade Cavalli",team:"CIN",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Curveball",velo:79},{type:"Changeup",velo:86}]},
-  {name:"Matthew Boyd",team:"CHC",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:81},{type:"Changeup",velo:83},{type:"Curveball",velo:74}]},
-  {name:"Andrew Abbott",team:"CIN",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Slider",velo:82},{type:"Curveball",velo:75},{type:"Changeup",velo:83}]},
-  // SP - NL West
-  {name:"Yoshinobu Yamamoto",team:"LAD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Splitter",velo:86},{type:"Slider",velo:84},{type:"Curveball",velo:78},{type:"Sinker",velo:94}]},
-  {name:"Logan Webb",team:"SF",hand:"R",role:"SP",pitches:[{type:"Sinker",velo:90},{type:"2-Seam FB",velo:90},{type:"Changeup",velo:84},{type:"Slider",velo:84},{type:"Curveball",velo:76}]},
-  {name:"Zac Gallen",team:"ARI",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:83},{type:"Changeup",velo:84},{type:"Cutter",velo:88},{type:"Curveball",velo:76}]},
-  {name:"Nick Pivetta",team:"SD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Curveball",velo:79},{type:"Slider",velo:85},{type:"Changeup",velo:84}]},
-  {name:"Kyle Freeland",team:"COL",hand:"L",role:"SP",pitches:[{type:"Sinker",velo:90},{type:"Cutter",velo:86},{type:"Curveball",velo:75},{type:"Changeup",velo:82}]},
-  {name:"Drew Rasmussen",team:"TB",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Cutter",velo:91},{type:"Slider",velo:86},{type:"Sinker",velo:95}]},
-  {name:"Dylan Cease",team:"SD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Curveball",velo:79},{type:"Changeup",velo:86}]},
-  {name:"Sandy Alcantara",team:"MIA",hand:"R",role:"SP",pitches:[{type:"Sinker",velo:96},{type:"Slider",velo:88},{type:"Changeup",velo:88},{type:"4-Seam FB",velo:96},{type:"Curveball",velo:82}]},
-  {name:"Yu Darvish",team:"SD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Cutter",velo:87},{type:"Slider",velo:82},{type:"Splitter",velo:84},{type:"Curveball",velo:76},{type:"Sinker",velo:91}]},
-  {name:"Sonny Gray",team:"STL",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:91},{type:"Slider",velo:82},{type:"Curveball",velo:76},{type:"Changeup",velo:82},{type:"Sinker",velo:90}]},
-  {name:"Pablo Lopez",team:"MIN",hand:"R",role:"SP",pitches:[{type:"Changeup",velo:84},{type:"4-Seam FB",velo:92},{type:"Slider",velo:83},{type:"Sinker",velo:91},{type:"Curveball",velo:76}]},
-  {name:"MacKenzie Gore",team:"WSH",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Slider",velo:82},{type:"Changeup",velo:84},{type:"Curveball",velo:75}]},
-  {name:"Bryce Miller",team:"SEA",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:96},{type:"Cutter",velo:90},{type:"Slider",velo:86},{type:"Curveball",velo:78}]},
-  {name:"Logan Gilbert",team:"SEA",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Slider",velo:85},{type:"Changeup",velo:85},{type:"Curveball",velo:77},{type:"Sinker",velo:93}]},
-  {name:"Justin Verlander",team:"DET",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Curveball",velo:75},{type:"Slider",velo:84},{type:"Changeup",velo:84},{type:"Sinker",velo:92}]},
-  {name:"Framber Valdez",team:"DET",hand:"L",role:"SP",pitches:[{type:"Sinker",velo:93},{type:"Curveball",velo:74},{type:"Changeup",velo:87},{type:"4-Seam FB",velo:93}]},
-  {name:"Blake Snell",team:"SF",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Curveball",velo:77},{type:"Slider",velo:83},{type:"Changeup",velo:84}]},
-  {name:"Julio Urias",team:"LAD",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:80},{type:"Changeup",velo:84},{type:"Curveball",velo:74}]},
-  {name:"Shane Bieber",team:"CLE",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:92},{type:"Slider",velo:83},{type:"Curveball",velo:75},{type:"Changeup",velo:84}]},
-  {name:"Tanner Bibee",team:"CLE",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:93},{type:"Slider",velo:84},{type:"Changeup",velo:83},{type:"Curveball",velo:76}]},
-  {name:"Ryan Pepiot",team:"TB",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:94},{type:"Changeup",velo:83},{type:"Slider",velo:84},{type:"Curveball",velo:77}]},
-  {name:"Shota Imanaga",team:"CHC",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:91},{type:"Splitter",velo:82},{type:"Slider",velo:81},{type:"Curveball",velo:73}]},
-  {name:"JP Sears",team:"OAK",hand:"L",role:"SP",pitches:[{type:"4-Seam FB",velo:91},{type:"Changeup",velo:82},{type:"Slider",velo:81},{type:"Cutter",velo:87}]},
-  {name:"Cristopher Sanchez",team:"PHI",hand:"L",role:"SP",pitches:[{type:"Sinker",velo:93},{type:"Slider",velo:83},{type:"Changeup",velo:84},{type:"4-Seam FB",velo:93}]},
-  {name:"Ranger Suarez",team:"PHI",hand:"L",role:"SP",pitches:[{type:"Sinker",velo:92},{type:"Curveball",velo:76},{type:"Cutter",velo:87},{type:"Changeup",velo:83}]},
-  {name:"Roki Sasaki",team:"LAD",hand:"R",role:"SP",pitches:[{type:"4-Seam FB",velo:99},{type:"Splitter",velo:89},{type:"Slider",velo:87},{type:"Cutter",velo:93}]},
-  // Closers / Relievers - updated for 2026
-  {name:"Mason Miller",team:"OAK",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:102},{type:"Slider",velo:91},{type:"Sinker",velo:101}]},
-  {name:"Edwin Diaz",team:"LAD",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:89},{type:"Sinker",velo:97}]},
-  {name:"Ryan Helsley",team:"BAL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:100},{type:"Slider",velo:90},{type:"Sinker",velo:99}]},
-  {name:"Aroldis Chapman",team:"BOS",hand:"L",role:"CL",pitches:[{type:"4-Seam FB",velo:99},{type:"Slider",velo:87},{type:"Sinker",velo:98}]},
-  {name:"Jhoan Duran",team:"PHI",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:101},{type:"Splitter",velo:90},{type:"Sinker",velo:100}]},
-  {name:"David Bednar",team:"NYY",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:85},{type:"Changeup",velo:85}]},
-  {name:"Devin Williams",team:"NYM",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:95},{type:"Changeup",velo:82},{type:"Slider",velo:85}]},
-  {name:"Raisel Iglesias",team:"ATL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:86},{type:"Changeup",velo:86}]},
-  {name:"Cade Smith",team:"CLE",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:86},{type:"Changeup",velo:85}]},
-  {name:"Bryan Abreu",team:"HOU",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:89},{type:"Changeup",velo:88}]},
-  {name:"Emmanuel Clase",team:"CLE",hand:"R",role:"CL",pitches:[{type:"Cutter",velo:100},{type:"Sinker",velo:98},{type:"Slider",velo:88}]},
-  {name:"Pete Fairbanks",team:"MIA",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:88},{type:"Splitter",velo:87}]},
-  {name:"Jeff Hoffman",team:"TOR",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Curveball",velo:79}]},
-  {name:"Kenley Jansen",team:"DET",hand:"R",role:"CL",pitches:[{type:"Cutter",velo:90},{type:"4-Seam FB",velo:91},{type:"Sinker",velo:90},{type:"Curveball",velo:75}]},
-  {name:"Paul Sewald",team:"ARI",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:93},{type:"Slider",velo:85},{type:"Changeup",velo:85}]},
-  {name:"Seranthony Dominguez",team:"CWS",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Sinker",velo:96}]},
-  {name:"Jordan Romano",team:"LAA",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Cutter",velo:91}]},
-  {name:"Camilo Doval",team:"NYY",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:98},{type:"Slider",velo:89},{type:"Sinker",velo:97}]},
-  {name:"Josh Hader",team:"HOU",hand:"L",role:"RP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:83},{type:"Sweeper",velo:81}]},
-  {name:"Andres Munoz",team:"SEA",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:100},{type:"Slider",velo:90},{type:"Sinker",velo:99}]},
-  {name:"Robert Suarez",team:"ATL",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:99},{type:"Slider",velo:89},{type:"Sinker",velo:98}]},
-  {name:"Tanner Scott",team:"LAD",hand:"L",role:"RP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:83},{type:"Sinker",velo:94}]},
-  {name:"Evan Phillips",team:"LAD",hand:"R",role:"RP",pitches:[{type:"Slider",velo:87},{type:"4-Seam FB",velo:94},{type:"Sinker",velo:93}]},
-  {name:"Michael King",team:"SD",hand:"R",role:"RP",pitches:[{type:"Cutter",velo:92},{type:"4-Seam FB",velo:94},{type:"Slider",velo:85},{type:"Sinker",velo:93}]},
-  {name:"Brusdar Graterol",team:"LAD",hand:"R",role:"RP",pitches:[{type:"Sinker",velo:100},{type:"Slider",velo:91},{type:"4-Seam FB",velo:100}]},
-  {name:"Yennier Cano",team:"BAL",hand:"R",role:"RP",pitches:[{type:"Sinker",velo:97},{type:"Slider",velo:87},{type:"4-Seam FB",velo:97}]},
-  {name:"A.J. Minter",team:"ATL",hand:"L",role:"RP",pitches:[{type:"4-Seam FB",velo:95},{type:"Slider",velo:84},{type:"Changeup",velo:85}]},
-  {name:"Gregory Soto",team:"PIT",hand:"L",role:"RP",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:84},{type:"Sinker",velo:96}]},
-  {name:"Dennis Santana",team:"PIT",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Sinker",velo:96}]},
-  {name:"Abner Uribe",team:"MIL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:99},{type:"Slider",velo:89},{type:"Sinker",velo:98}]},
-  {name:"Trevor Megill",team:"MIL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Curveball",velo:79}]},
-  {name:"Daniel Palencia",team:"CHC",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:99},{type:"Slider",velo:88}]},
-  {name:"Bryan King",team:"MIL",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:86},{type:"Changeup",velo:85}]},
-  {name:"Clay Holmes",team:"NYM",hand:"R",role:"RP",pitches:[{type:"Sinker",velo:97},{type:"Slider",velo:86},{type:"4-Seam FB",velo:96}]},
-  {name:"Yimi Garcia",team:"TOR",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:87},{type:"Splitter",velo:86}]},
-  {name:"Griffin Jax",team:"TB",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:94},{type:"Sweeper",velo:83},{type:"Slider",velo:85}]},
-  {name:"Emilio Pagan",team:"CIN",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:96},{type:"Slider",velo:86},{type:"Changeup",velo:85}]},
-  {name:"Alexis Diaz",team:"CIN",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:97},{type:"Slider",velo:87},{type:"Changeup",velo:86}]},
-  {name:"Felix Bautista",team:"BAL",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:99},{type:"Splitter",velo:88},{type:"Slider",velo:89}]},
-  {name:"Garrett Whitlock",team:"BOS",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:94},{type:"Splitter",velo:84},{type:"Slider",velo:84},{type:"Sinker",velo:93}]},
-  {name:"Luke Weaver",team:"NYM",hand:"R",role:"RP",pitches:[{type:"4-Seam FB",velo:94},{type:"Slider",velo:84},{type:"Changeup",velo:84},{type:"Curveball",velo:77}]},
-  {name:"Ryne Stanek",team:"STL",hand:"R",role:"CL",pitches:[{type:"4-Seam FB",velo:97},{type:"Sweeper",velo:85},{type:"Slider",velo:87}]},
-];
+const PITCHERS = [];   // unused -- DD card API only
+const MLB_BATTERS = []; // unused -- DD card API only
+
+async function randomLineupFromApi(){
+  // Pick 9 random last names, fetch one result each, filter hitters
+  const shuffled=[...RANDOM_NAMES].sort(()=>Math.random()-0.5).slice(0,18);
+  const results=[];
+  for(const name of shuffled){
+    if(results.length>=9) break;
+    try{
+      const data=await mlbFetch('/apis/listings.json?type=mlb_card&name='+encodeURIComponent(name));
+      const hitters=(data?.listings||[]).map(l=>l.item||l).filter(c=>c.is_hitter===true||c.is_hitter===1);
+      if(hitters.length>0){
+        const pick=hitters[Math.floor(Math.random()*hitters.length)];
+        results.push({name:pick.name,bat:pick.bat_hand||'R',custom:false,ovr:pick.ovr||0,uuid:pick.uuid||''});
+      }
+    }catch(e){}
+  }
+  // Pad with empty slots if needed
+  while(results.length<9) results.push({name:'',bat:'R',custom:false});
+  return results;
+}
+
 
 // ─── Pitch Logic ──────────────────────────────────────────────────────────────
 const PITCH_PROFILES = {
@@ -627,13 +489,7 @@ function LineupSetup({onSave}){
   const [activeSlot,setActiveSlot]=useState(null);
   const [apiResults,setApiResults]=useState([]);
   const [apiLoading,setApiLoading]=useState(false);
-  const proxyReady = true;
-
-  const localResults=useMemo(()=>{
-    if(query.length<2) return [];
-    const q=query.toLowerCase();
-    return MLB_BATTERS.filter(b=>b.name.toLowerCase().includes(q)).slice(0,6);
-  },[query]);
+  const [autoFilling,setAutoFilling]=useState(false);
 
   useEffect(()=>{
     if(query.length<2){setApiResults([]);return;}
@@ -648,7 +504,7 @@ function LineupSetup({onSave}){
     return()=>clearTimeout(t);
   },[query]);
 
-  const results=proxyReady?(apiResults.length>0?apiResults:localResults):localResults;
+  const results=apiResults;
 
   const selectBatter=(slot,batter)=>{
     const next=[...lineup];
@@ -665,9 +521,11 @@ function LineupSetup({onSave}){
     setLineup(next);
   };
 
-  const autoGenLineup=()=>{
-    const shuffled=[...MLB_BATTERS].sort(()=>Math.random()-0.5).slice(0,9);
-    setLineup(shuffled.map(b=>({name:b.name,bat:b.bat,custom:false})));
+  const autoGenLineup=async()=>{
+    setAutoFilling(true);
+    const lu=await randomLineupFromApi();
+    setLineup(lu);
+    setAutoFilling(false);
   };
 
   const canSave=lineup.some(s=>s.name.trim());
@@ -676,10 +534,10 @@ function LineupSetup({onSave}){
     <div style={{padding:"16px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
         <div style={S.sectionLabel}>Opposing Lineup</div>
-        <button onClick={autoGenLineup} style={S.ghostBtn}>🎲 Auto-Fill</button>
+        <button onClick={autoGenLineup} disabled={autoFilling} style={{...S.ghostBtn,opacity:autoFilling?0.5:1}}>{autoFilling?"Filling...":"🎲 Auto-Fill"}</button>
       </div>
-      <div style={{fontSize:11,color:apiResults.length>0?C.green:C.textSoft,marginBottom:12,fontWeight:600}}>
-        {apiLoading?"Searching DD cards...":apiResults.length>0?"🟢 DD cards found":"Search by name to find DD cards or local players"}
+      <div style={{fontSize:11,color:C.textSoft,marginBottom:12,fontWeight:600}}>
+        Search DD card names to build your lineup
       </div>
       {lineup.map((slot,i)=>(
         <div key={i} style={{
@@ -793,12 +651,6 @@ function SetupTab({onComplete}){
   const proxyReady = true;
 
   // All hooks must run before any early return
-  const localResults=useMemo(()=>{
-    if(query.length<2) return [];
-    const q=query.toLowerCase();
-    return PITCHERS.filter(p=>p.name.toLowerCase().includes(q)).slice(0,6);
-  },[query]);
-
   useEffect(()=>{
     if(query.length<2||selectedName){setApiResults([]);setApiError("");return;}
     const t=setTimeout(async()=>{
@@ -814,7 +666,7 @@ function SetupTab({onComplete}){
     return()=>clearTimeout(t);
   },[query,selectedName]);
 
-  const results=proxyReady?(apiResults.length>0?apiResults:localResults):localResults;
+  const results=apiResults;
 
   // batterIdx must be a hook -- declare before early return
   const [batterIdx,setBatterIdx]=useState(0);
@@ -838,13 +690,6 @@ function SetupTab({onComplete}){
     const next=[...pitches];
     next[i]={...next[i],[field]:field==="velo"?parseInt(val)||0:val};
     setPitches(next);
-  };
-
-  const autoGen=()=>{
-    const p=PITCHERS[Math.floor(Math.random()*PITCHERS.length)];
-    selectPitcher(p);
-    const shuffled=[...MLB_BATTERS].sort(()=>Math.random()-0.5).slice(0,9);
-    setLineup(shuffled.map(b=>({name:b.name,bat:b.bat,custom:false})));
   };
 
   const canStart=pitches.length>=2;
@@ -946,11 +791,6 @@ function SetupTab({onComplete}){
               </div>
             </div>
           )}
-
-          {/* Auto-gen for testing */}
-          <button onClick={autoGen} style={{...S.secondaryBtn,marginBottom:8}}>
-            🎲 Auto-Generate (Testing)
-          </button>
 
           <button onClick={()=>canStart&&onComplete({pitcherHand,batterHand:effectiveBatterHand,pitches,lineup,batterIdx,setBatterIdx,pitcherName:selectedName||"Custom",pitcherOvr:apiResults.find(r=>r.name===selectedName)?.ovr||0,gameType:gameType.id,totalInnings:gameType.id==="event"?6:9})}
             style={{...S.primaryBtn,opacity:canStart?1:0.4}} disabled={!canStart}>
@@ -1097,6 +937,14 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       if(zoneRepeatCapped(recZ)) return null;
       if(pitchZoneCapped(p.type,recZ)) return null;
 
+      // Hard cap: no more than 2 consecutive non-FB pitches in a row
+      const last2Types=sequence.slice(-2).map(e=>e.pitch);
+      if(!isFB && last2Types.length===2 && last2Types.every(t=>!FB_TYPES.has(t))) return null;
+
+      // Hard cap: no more than 3 consecutive FB pitches in a row
+      const last3Types=sequence.slice(-3).map(e=>e.pitch);
+      if(isFB && last3Types.length===3 && last3Types.every(t=>FB_TYPES.has(t))) return null;
+
       // Factor 1: Tunnel score (0-100 scale)
       let tunnelFactor=lastThrown
         ?tunnelScore(lastThrown,p.type,pitches.find(x=>x.type===lastThrown)?.velo||90,p.velo,pitcherHand)
@@ -1171,7 +1019,11 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
   },[pitches,countKey,lastThrown,lastZone,outcomes,pitcherHand,pitchZoneHistory,gameLog,effectiveBatterHand,sequence,session,balls,strikes]);
 
   // Active rec drives both the box and the blue baseball
-  const activePitch=scored.find(p=>p.type===selectedPitch)||scored[0];
+  const activePitch=scored.find(p=>selectedPitch&&p.type===selectedPitch)||scored[0];
+  // Keep selectedPitch in sync with top recommendation when null
+  useEffect(()=>{
+    if(!selectedPitch&&scored.length>0) setSelectedPitch(scored[0].type);
+  },[scored,selectedPitch]);
   const chaseW=activePitch?.chaseWeight||0;
   // Deterministic chase decision per at-bat state (use sequence length as seed to avoid re-render flicker)
   const useChase=chaseW>0&&((sequence.length*17+strikes*7)%100)<(chaseW*100);
@@ -1190,6 +1042,8 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       onBase:isOnBase||false,
       batter:currentBatter?.name||"",
     });
+    setSelectedZone(null);
+    setSelectedPitch(null); // will reset to top recommendation on next render
     if(isOut||isOnBase) setShowOutConfirm(true);
   };
 
@@ -1199,11 +1053,11 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       const nb=balls+1;
       setBalls(nb);
       if(nb>=4){
-        // Walk -- log then show confirm
         onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Walk",outcomeId:"walk",isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||""});
         setSelectedZone(null);
+        setSelectedPitch(null);
         setShowOutConfirm(true);
-      } else { setSelectedZone(null); }
+      } else { setSelectedZone(null);setSelectedPitch(null); }
       return;
     }
     if(oc.id==="look"||oc.id==="swing"){
@@ -1211,18 +1065,21 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       setStrikes(ns);
       onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:oc.label,outcomeId:oc.id,isPositive:true,isOut:false,onBase:false,batter:currentBatter?.name||""});
       setSelectedZone(null);
-      if(ns>=3) setShowOutConfirm(true); // K -- show confirm
+      setSelectedPitch(null);
+      if(ns>=3) setShowOutConfirm(true);
       return;
     }
     if(oc.id==="foul"){
       if(strikes<2) setStrikes(2);
       onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Foul",outcomeId:"foul",isPositive:false,isOut:false,onBase:false,batter:currentBatter?.name||""});
       setSelectedZone(null);
+      setSelectedPitch(null);
       return;
     }
     if(oc.id==="hbp"){
       onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"HBP",outcomeId:"hbp",isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||""});
       setSelectedZone(null);
+      setSelectedPitch(null);
       setShowOutConfirm(true);
       return;
     }
@@ -1303,10 +1160,19 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
     // "onbase" -> show hit type buttons (handled inline)
   };
 
-  const subResults=useMemo(()=>{
-    if(subQuery.length<2) return [];
-    return MLB_BATTERS.filter(b=>b.name.toLowerCase().includes(subQuery.toLowerCase())).slice(0,5);
+  const [subApiResults,setSubApiResults]=useState([]);
+  const [subApiLoading,setSubApiLoading]=useState(false);
+  useEffect(()=>{
+    if(subQuery.length<2){setSubApiResults([]);return;}
+    const t=setTimeout(async()=>{
+      setSubApiLoading(true);
+      try{const res=await searchBatters(subQuery);setSubApiResults(res.slice(0,6));}
+      catch(e){setSubApiResults([]);}
+      finally{setSubApiLoading(false);}
+    },400);
+    return()=>clearTimeout(t);
   },[subQuery]);
+  const subResults=subApiResults;
 
   const currentBases=session.bases||{first:null,second:null,third:null};
   const stealThreat=activePitch?.stealThreat;
@@ -1630,20 +1496,8 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
 
 // ─── Visuals Tab ──────────────────────────────────────────────────────────────
 function VisualsTab({session}){
-  const{pitches,gameLog,pitcherHand}=session;
+  const{gameLog}=session;
   const[selectedZoneInfo,setSelectedZoneInfo]=useState(null);
-  const dotColors=[C.green,"#b5811b","#b5451b","#5b8dd9","#7c5cbf","#d97c2d","#2d9bb5"];
-
-  // Movement chart: map pitch movement to SVG coords on a labeled grid
-  // Grid: x=horizontal break (-20 to +20 in), y=vertical break (-15 to +20 in)
-  const GRID={xMin:-22,xMax:22,yMin:-16,yMax:22,w:160,h:140,pad:20};
-  const toSvg=(h,v)=>({
-    x: GRID.pad + ((h-GRID.xMin)/(GRID.xMax-GRID.xMin))*(GRID.w-2*GRID.pad),
-    y: GRID.h-GRID.pad - ((v-GRID.yMin)/(GRID.yMax-GRID.yMin))*(GRID.h-2*GRID.pad),
-  });
-  const origin=toSvg(0,0);
-  const xTicks=[-20,-10,0,10,20];
-  const yTicks=[-10,0,10,20];
 
   // Zone heatmap data
   const zoneData={};
@@ -1672,45 +1526,6 @@ function VisualsTab({session}){
 
   return(
     <div style={{padding:"16px"}}>
-      {/* Movement chart */}
-      <div style={S.sectionLabel}>Pitch Movement Profile</div>
-      <div style={{...S.card,marginBottom:16,overflowX:"auto"}}>
-        <svg viewBox={`0 0 ${GRID.w} ${GRID.h}`} style={{width:"100%",height:180}}>
-          {/* Grid lines */}
-          {xTicks.map(x=>{const p=toSvg(x,0);return(<g key={x}>
-            <line x1={p.x} y1={GRID.pad} x2={p.x} y2={GRID.h-GRID.pad} stroke={x===0?"#b0b0b0":C.border} strokeWidth={x===0?0.8:0.4} strokeDasharray={x===0?"none":"2,2"}/>
-            <text x={p.x} y={GRID.h-GRID.pad+7} fontSize={4} fill={C.textSoft} textAnchor="middle" fontFamily="Nunito,sans-serif">{x}</text>
-          </g>);})}
-          {yTicks.map(y=>{const p=toSvg(0,y);return(<g key={y}>
-            <line x1={GRID.pad} y1={p.y} x2={GRID.w-GRID.pad} y2={p.y} stroke={y===0?"#b0b0b0":C.border} strokeWidth={y===0?0.8:0.4} strokeDasharray={y===0?"none":"2,2"}/>
-            <text x={GRID.pad-2} y={p.y+1.5} fontSize={4} fill={C.textSoft} textAnchor="end" fontFamily="Nunito,sans-serif">{y}</text>
-          </g>);})}
-          {/* Axis labels */}
-          <text x={GRID.w/2} y={GRID.h-1} fontSize={4.5} fill={C.textMid} textAnchor="middle" fontFamily="Nunito,sans-serif" fontWeight="700">Horizontal Break (in)</text>
-          <text x={3} y={GRID.h/2} fontSize={4.5} fill={C.textMid} textAnchor="middle" fontFamily="Nunito,sans-serif" fontWeight="700" transform={`rotate(-90,3,${GRID.h/2})`}>Vertical (in)</text>
-          {/* Origin cross */}
-          <circle cx={origin.x} cy={origin.y} r={1.5} fill={C.border}/>
-          {/* Pitch dots */}
-          {pitches.map((p,i)=>{
-            const m=getMovement(p.type,p.velo,pitcherHand);
-            const{x,y}=toSvg(m.h,m.v);
-            const cx2=Math.min(GRID.w-GRID.pad-2,Math.max(GRID.pad+2,x));
-            const cy2=Math.min(GRID.h-GRID.pad-2,Math.max(GRID.pad+2,y));
-            const col=dotColors[i%dotColors.length];
-            return(<g key={p.type}>
-              <circle cx={cx2} cy={cy2} r={5} fill={col} opacity={0.9}/>
-              <text x={cx2+7} y={cy2+1.5} fontSize={4.2} fill={col} fontFamily="Nunito,sans-serif" fontWeight="700">{p.type.split(" ")[0]}</text>
-            </g>);
-          })}
-        </svg>
-        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:4}}>
-          {pitches.map((p,i)=>(<div key={p.type} style={{display:"flex",alignItems:"center",gap:5}}>
-            <div style={{width:9,height:9,borderRadius:"50%",background:dotColors[i%dotColors.length]}}/>
-            <span style={{color:C.textMid,fontSize:11,fontWeight:600}}>{p.type} ({p.velo})</span>
-          </div>))}
-        </div>
-      </div>
-
       {/* Heatmap */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
         <div style={S.sectionLabel}>Zone Heatmap <span style={{fontWeight:500,color:C.textSoft}}>({gameLog.length} pitches)</span></div>
