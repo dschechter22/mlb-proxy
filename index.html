@@ -699,6 +699,7 @@ function SetupTab({onComplete,onViewStats}){
   const [apiResults,setApiResults]=useState([]);
   const [apiLoading,setApiLoading]=useState(false);
   const [apiError,setApiError]=useState("");
+  const [selectedCard,setSelectedCard]=useState(null);
   const [autoGenning,setAutoGenning]=useState(false);
   const proxyReady = true;
 
@@ -746,6 +747,8 @@ function SetupTab({onComplete,onViewStats}){
     setSelectedName(p.name);setPitcherHand(p.hand||"R");
     setPitches((p.pitches||[]).map(x=>({...x})));setQuery(p.name);
     setApiResults([]);
+    // Store card data for use at Start Game
+    setSelectedCard(p);
   };
   const addPitch=()=>pitches.length<7&&setPitches([...pitches,{type:"4-Seam FB",velo:93}]);
   const removePitch=(i)=>setPitches(pitches.filter((_,idx)=>idx!==i));
@@ -766,10 +769,9 @@ function SetupTab({onComplete,onViewStats}){
 
   const startGameBtn=(
     <button onClick={()=>{
-      const apiCard=apiResults.find(r=>r.name===selectedName);
       canStart&&onComplete({pitcherHand,batterHand:effectiveBatterHand,pitches,lineup,batterIdx,setBatterIdx,
-        pitcherName:selectedName||"Custom",pitcherOvr:apiCard?.ovr||0,
-        pitcherControl:apiCard?.control||null,pitcherMovement:apiCard?.movement||null,
+        pitcherName:selectedName||"Custom",pitcherOvr:selectedCard?.ovr||0,
+        pitcherControl:selectedCard?.control||null,pitcherMovement:selectedCard?.movement||null,
         gameType:gameType.id,totalInnings:gameType.id==="event"?6:gameType.id==="br"?3:9});
     }}
       style={{...S.primaryBtn,opacity:canStart?1:0.4,margin:"12px 16px 0"}} disabled={!canStart}>
@@ -941,17 +943,20 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
   const[subSlot,setSubSlot]=useState(null);
   const[contactPending,setContactPending]=useState(null);
   const[contactClass,setContactClass]=useState(null);
-  const[hitResult,setHitResult]=useState(null);           // "out"|"single"|"double"|"triple"|"hr"|"error"
+  const[hitResult,setHitResult]=useState(null);
   const[showOutConfirm,setShowOutConfirm]=useState(false);
-  const[outConfirmType,setOutConfirmType]=useState("out"); // "k"|"walk"|"hbp"|"out"
+  const[outConfirmType,setOutConfirmType]=useState("out");
   const[runnerScoringIdx,setRunnerScoringIdx]=useState(0);
   const[runnersToScore,setRunnersToScore]=useState([]);
+  const[runnersToAdvance,setRunnersToAdvance]=useState([]); // for out advancement
+  const[runnerAdvanceIdx,setRunnerAdvanceIdx]=useState(0);
   const[batterStats,setBatterStats]=useState(null);
   const[batterStatsLoading,setBatterStatsLoading]=useState(false);
 
   const resetContactFlow=()=>{
     setContactPending(null);setContactClass(null);setHitResult(null);
     setRunnersToScore([]);setRunnerScoringIdx(0);
+    setRunnersToAdvance([]);setRunnerAdvanceIdx(0);
   };
 
   const currentBatter=lineup?lineup[batterIdx]:null;
@@ -1148,6 +1153,51 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
     onNewAtBat();
   };
 
+  // After recording an out, prompt runners to advance
+  const triggerOutAdvancement=()=>{
+    const cb=session.bases||{first:null,second:null,third:null};
+    const occupied=[
+      cb.third&&{base:"third",name:cb.third.name||"Runner"},
+      cb.second&&{base:"second",name:cb.second.name||"Runner"},
+      cb.first&&{base:"first",name:cb.first.name||"Runner"},
+    ].filter(Boolean); // lead runner first
+    if(occupied.length>0){
+      setRunnersToAdvance(occupied);setRunnerAdvanceIdx(0);
+    } else {
+      setShowOutConfirm(true);
+    }
+  };
+
+  const handleRunnerAdvance=(dest)=>{
+    const runner=runnersToAdvance[runnerAdvanceIdx];
+    const cb=session.bases||{first:null,second:null,third:null};
+    const nb={...cb};
+    // Remove from current base
+    nb[runner.base]=null;
+    // Place at destination
+    if(dest==="adv1"){
+      const next={first:"second",second:"third",third:null}[runner.base];
+      if(next) nb[next]={name:runner.name,fast:false};
+    } else if(dest==="adv2"){
+      const next={first:"third",second:null,third:null}[runner.base];
+      if(next) nb[next]={name:runner.name,fast:false};
+      // from second or third with adv2 = scores
+    } else if(dest==="scored"){
+      // runner removed, already cleared above
+    } else {
+      // stayed -- put back
+      nb[runner.base]={name:runner.name,fast:false};
+    }
+    onUpdateBases(nb);
+    const nextIdx=runnerAdvanceIdx+1;
+    if(nextIdx>=runnersToAdvance.length){
+      setRunnersToAdvance([]);setRunnerAdvanceIdx(0);
+      setShowOutConfirm(true);
+    } else {
+      setRunnerAdvanceIdx(nextIdx);
+    }
+  };
+
   const handleOutcome=(oc)=>{
     if(!selectedZone) return;
     if(oc.id==="ball"){
@@ -1156,8 +1206,28 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
         onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Walk",outcomeId:"walk",
           isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||"",balls:nb-1,strikes,inning});
         setSelectedZone(null);setSelectedPitch(null);
+        // Force advancement: cascade bases if occupied
         const cb=session.bases||{first:null,second:null,third:null};
-        onUpdateBases({...cb,first:{name:currentBatter?.name||"Batter",fast:false}});
+        const nb2={...cb};
+        const batterName=currentBatter?.name||"Batter";
+        if(cb.first&&cb.second&&cb.third){
+          // Bases loaded -- everyone advances, run scores
+          nb2.first={name:batterName,fast:false};
+          // second and third stay, third runner scores (implicit)
+          nb2.third=nb2.second;nb2.second=nb2.first;nb2.first={name:batterName,fast:false};
+          // Actually: third scores, second->third, first->second, batter->first
+          nb2.third=cb.second;nb2.second=cb.first;nb2.first={name:batterName,fast:false};
+        } else if(cb.first&&cb.second){
+          // First and second: second->third, first->second, batter->first
+          nb2.third=cb.second;nb2.second=cb.first;nb2.first={name:batterName,fast:false};
+        } else if(cb.first){
+          // First occupied: first->second, batter->first
+          nb2.second=cb.first;nb2.first={name:batterName,fast:false};
+        } else {
+          // First empty: batter->first
+          nb2.first={name:batterName,fast:false};
+        }
+        onUpdateBases(nb2);
         setOutConfirmType("walk");setShowOutConfirm(true);
       } else {setSelectedZone(null);setSelectedPitch(null);}
       return;
@@ -1167,7 +1237,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:oc.label,outcomeId:oc.id,
         isPositive:true,isOut:ns>=3,onBase:false,batter:currentBatter?.name||"",balls,strikes:ns-1,inning});
       setSelectedZone(null);setSelectedPitch(null);
-      if(ns>=3){onAddOut();setOutConfirmType("k");setShowOutConfirm(true);}
+      if(ns>=3){onAddOut();setOutConfirmType("k");triggerOutAdvancement();}
       return;
     }
     if(oc.id==="foul"){
@@ -1208,7 +1278,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
     });
     setSelectedZone(null);setSelectedPitch(null);setHitResult(result);
     if(isOut){
-      onAddOut();resetContactFlow();setOutConfirmType("out");setShowOutConfirm(true);
+      onAddOut();resetContactFlow();setOutConfirmType("out");triggerOutAdvancement();
       return;
     }
     // Place batter on base
@@ -1228,13 +1298,24 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
     }
   };
 
-  const handleRunnerScored=(scored)=>{
-    if(scored){
-      const cb=session.bases||{first:null,second:null,third:null};
-      const nb={...cb};
-      nb[runnersToScore[runnerScoringIdx].base]=null;
-      onUpdateBases(nb);
+  // Full advancement options for runners on hit/error: stayed, adv1, adv2, scored
+  const handleRunnerAdvanceOnHit=(dest)=>{
+    const runner=runnersToScore[runnerScoringIdx];
+    const cb=session.bases||{first:null,second:null,third:null};
+    const nb={...cb};
+    nb[runner.base]=null; // remove from current base
+    if(dest==="stayed"){
+      nb[runner.base]={name:runner.name,fast:false}; // put back
+    } else if(dest==="adv1"){
+      const next={first:"second",second:"third",third:null}[runner.base];
+      if(next) nb[next]={name:runner.name,fast:false};
+    } else if(dest==="adv2"){
+      const next={first:"third",second:null,third:null}[runner.base];
+      if(next) nb[next]={name:runner.name,fast:false};
+      // from second or third adv2 = scores (already cleared)
     }
+    // dest==="scored" => runner cleared, already done above
+    onUpdateBases(nb);
     const nextIdx=runnerScoringIdx+1;
     if(nextIdx>=runnersToScore.length){resetContactFlow();advanceNext();}
     else setRunnerScoringIdx(nextIdx);
@@ -1363,11 +1444,15 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       {/* Sub panel */}
       {showSub&&(
         <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:10,marginBottom:10}}>
-          <div style={{fontSize:10,fontWeight:800,color:C.textSoft,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.08em"}}>Substitution</div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div style={{fontSize:10,fontWeight:800,color:C.textSoft,textTransform:"uppercase",letterSpacing:"0.08em"}}>Substitution</div>
+            <button onClick={()=>{setShowSub(false);setSubQuery("");setSubSlot(null);}} style={{fontSize:10,background:"none",border:"none",cursor:"pointer",color:C.textSoft,fontFamily:"'Nunito',sans-serif"}}>✕</button>
+          </div>
+          {/* Slot selector */}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
             {lineup&&lineup.map((b,i)=>(
-              <button key={i} onClick={()=>setSubSlot(i)} style={{
-                padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+              <button key={i} onClick={()=>{setSubSlot(i);setSubQuery("");setSubApiResults([]);}} style={{
+                padding:"4px 8px",borderRadius:6,fontSize:10,fontWeight:700,fontFamily:"'Nunito',sans-serif",
                 background:subSlot===i?C.green:C.surface,color:subSlot===i?"#fff":C.textMid,
                 border:`1px solid ${subSlot===i?C.green:C.border}`,cursor:"pointer",
               }}>{i+1}. {b.name||"—"}</button>
@@ -1375,15 +1460,23 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
           </div>
           {subSlot!==null&&(
             <>
-              <input value={subQuery} onChange={e=>setSubQuery(e.target.value)} placeholder="New batter name..."
+              <input value={subQuery} onChange={e=>setSubQuery(e.target.value)}
+                placeholder="Search DD card name..."
                 style={{...S.input,width:"100%",boxSizing:"border-box",marginBottom:4}}/>
-              {subResults.map(b=>(
-                <div key={b.name} onClick={()=>{onSub(subSlot,b);setShowSub(false);setSubQuery("");setSubSlot(null);}} style={{
+              {subApiLoading&&<div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>Searching...</div>}
+              {!subApiLoading&&subQuery.length>=2&&subApiResults.length===0&&(
+                <div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>No results found</div>
+              )}
+              {subApiResults.map(b=>(
+                <div key={b.name+(b.ovr||"")} onClick={()=>{onSub(subSlot,b);setShowSub(false);setSubQuery("");setSubSlot(null);setSubApiResults([]);}} style={{
                   padding:"8px 10px",background:C.surface,borderRadius:6,marginBottom:3,cursor:"pointer",
-                  display:"flex",justifyContent:"space-between",
+                  display:"flex",justifyContent:"space-between",alignItems:"center",
                 }}>
-                  <span style={{fontWeight:700,fontSize:12}}>{b.name}</span>
-                  <span style={{fontSize:10,color:C.textSoft}}>{b.bat}H</span>
+                  <div>
+                    <span style={{fontWeight:700,fontSize:12,color:C.text}}>{b.name}</span>
+                    {b.rarity&&<span style={{fontSize:9,color:C.textSoft,marginLeft:6}}>{b.rarity}</span>}
+                  </div>
+                  <span style={{fontSize:10,color:C.textSoft,fontWeight:600}}>{b.bat}H{b.ovr?` · ${b.ovr}`:""}</span>
                 </div>
               ))}
             </>
@@ -1453,7 +1546,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       )}
 
       {/* Steal threat notice */}
-      {stealThreat&&!showOutConfirm&&!contactPending&&runnersToScore.length===0&&(
+      {stealThreat&&!showOutConfirm&&!contactPending&&runnersToScore.length===0&&runnersToAdvance.length===0&&(
         <div style={{background:C.goldLight,border:`1.5px solid ${C.gold}`,borderRadius:8,padding:"7px 12px",marginBottom:10,fontSize:11,fontWeight:700,color:C.gold}}>
           ⚡ Steal threat on base — stretch recommended, fastball frequency boosted
         </div>
@@ -1472,28 +1565,56 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
         </div>
       )}
 
-      {/* Runner scoring flow */}
+      {/* Runner advancement after OUT */}
+      {runnersToAdvance.length>0&&runnerAdvanceIdx<runnersToAdvance.length&&(
+        <div style={{background:C.white,border:`2px solid ${C.green}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>
+            Where did <span style={{color:C.green}}>{runnersToAdvance[runnerAdvanceIdx].name}</span> end up?
+            <span style={{fontSize:10,color:C.textSoft,fontWeight:500,marginLeft:6}}>({runnersToAdvance[runnerAdvanceIdx].base})</span>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {[
+              ["stayed","Stayed"],
+              ["adv1","Advanced 1 base"],
+              ["adv2","Advanced 2 bases"],
+              ["scored","Scored"],
+            ].map(([id,lbl])=>(
+              <button key={id} onClick={()=>handleRunnerAdvance(id)} style={{
+                padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,background:C.surface,
+                color:C.text,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif",textAlign:"left",
+              }}>{lbl}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Runner advancement on HIT */}
       {runnersToScore.length>0&&runnerScoringIdx<runnersToScore.length&&(
         <div style={{background:C.white,border:`2px solid ${C.gold}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:12}}>
-            Did <span style={{color:C.gold}}>{runnersToScore[runnerScoringIdx].name}</span> score?
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>
+            Where did <span style={{color:C.gold}}>{runnersToScore[runnerScoringIdx].name}</span> end up?
             <span style={{fontSize:10,color:C.textSoft,fontWeight:500,marginLeft:6}}>({runnersToScore[runnerScoringIdx].base})</span>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <button onClick={()=>handleRunnerScored(true)} style={{
-              padding:"12px",borderRadius:9,border:`1.5px solid ${C.green}`,background:C.greenLight,
-              color:C.green,fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
-            }}>Yes, scored ✓</button>
-            <button onClick={()=>handleRunnerScored(false)} style={{
-              padding:"12px",borderRadius:9,border:`1.5px solid ${C.border}`,background:C.surface,
-              color:C.textMid,fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
-            }}>No, stayed</button>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {[
+              ["stayed","Stayed"],
+              ["adv1","Advanced 1 base"],
+              ["adv2","Advanced 2 bases"],
+              ["scored","Scored ✓"],
+            ].map(([id,lbl])=>(
+              <button key={id} onClick={()=>handleRunnerAdvanceOnHit(id)} style={{
+                padding:"10px 12px",borderRadius:8,fontFamily:"'Nunito',sans-serif",fontSize:12,fontWeight:700,cursor:"pointer",textAlign:"left",
+                border:`1.5px solid ${id==="scored"?C.green:C.border}`,
+                background:id==="scored"?C.greenLight:C.surface,
+                color:id==="scored"?C.green:C.text,
+              }}>{lbl}</button>
+            ))}
           </div>
         </div>
       )}
 
       {/* Contact flow: step 1 GB/LD/FB, step 2 result */}
-      {contactPending&&!showOutConfirm&&runnersToScore.length===0&&runnerScoringIdx===0&&(
+      {contactPending&&!showOutConfirm&&runnersToScore.length===0&&runnersToAdvance.length===0&&runnerScoringIdx===0&&(
         <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <div style={{fontSize:11,fontWeight:800,color:C.textSoft,textTransform:"uppercase",letterSpacing:"0.08em"}}>
@@ -1546,7 +1667,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       )}
 
       {/* Recommendation box -- driven by activePitch */}
-      {activePitch&&!showOutConfirm&&!contactPending&&runnersToScore.length===0&&(
+      {activePitch&&!showOutConfirm&&!contactPending&&runnersToScore.length===0&&runnersToAdvance.length===0&&(
         <div style={S.recBox}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
@@ -1563,7 +1684,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
         </div>
       )}
 
-      {!showOutConfirm&&!contactPending&&runnersToScore.length===0&&(<>
+      {!showOutConfirm&&!contactPending&&runnersToScore.length===0&&runnersToAdvance.length===0&&(<>
         {/* Pitch selector */}
         <div style={{marginBottom:12}}>
           <div style={S.sectionLabel}>Select Pitch</div>
@@ -1618,91 +1739,158 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
 }
 
 // ─── Visuals Tab ──────────────────────────────────────────────────────────────
-function VisualsTab({session}){
-  const{gameLog}=session;
-  const[selectedZoneInfo,setSelectedZoneInfo]=useState(null);
+function LineupTab({session}){
+  const{lineup,gameLog,batterIdx}=session;
+  const[selected,setSelected]=useState(null);
 
-  // Zone heatmap data
-  const zoneData={};
-  gameLog.forEach(e=>{
-    if(!e.zone) return;
-    if(!zoneData[e.zone]) zoneData[e.zone]={pitches:[],outs:0,onBase:0,fouls:0,balls:0,total:0};
-    zoneData[e.zone].pitches.push(e);
-    zoneData[e.zone].total++;
-    if(e.isOut) zoneData[e.zone].outs++;
-    else if(e.onBase) zoneData[e.zone].onBase++;
-    else if(e.outcomeId==="foul") zoneData[e.zone].fouls++;
-    else if(e.outcomeId==="ball") zoneData[e.zone].balls++;
-  });
+  // Build per-batter pitch log from gameLog
+  const batterLog=useMemo(()=>{
+    const map={};
+    (gameLog||[]).forEach(e=>{
+      const k=e.batter||"";
+      if(!k.trim()) return;
+      if(!map[k]) map[k]=[];
+      map[k].push(e);
+    });
+    return map;
+  },[gameLog]);
 
-  // Zone color: red = pitcher favoring (low opp average), blue = batter favoring (high opp hits)
-  const zoneColor=(id)=>{
-    const d=zoneData[id]; if(!d||d.total<1) return null;
-    // Opponent "average" = on base events / contact events (hard+weak)
-    const contact=d.pitches.filter(p=>["hard","weak"].includes(p.outcomeId)).length;
-    if(contact===0) return null;
-    const avg=d.onBase/contact; // 0=all outs, 1=all on base
-    if(avg<=0.25) return `rgba(180,30,30,${0.15+avg*0.5})`; // red = good zone
-    if(avg>=0.6)  return `rgba(26,111,181,${0.15+avg*0.4})`; // blue = bad zone
-    return `rgba(181,129,27,${0.2})`; // gold = neutral
+  const PITCH_COLORS={
+    "4-Seam FB":"#e74c3c","2-Seam FB":"#c0392b","Cutter":"#e67e22","Sinker":"#d35400",
+    "Slider":"#2980b9","Sweeper":"#1a5fa8","Curveball":"#8e44ad","12-6 Curve":"#6c3483",
+    "Changeup":"#27ae60","Splitter":"#1e8449","Knuckleball":"#7f8c8d",
   };
+
+  const outcomeColor=(e)=>{
+    if(e.isOut) return C.green;
+    if(e.onBase) return C.warn;
+    if(e.outcomeId==="foul") return C.gold;
+    if(e.outcomeId==="ball") return C.textSoft;
+    return C.textSoft;
+  };
+
+  const outcomeIcon=(e)=>{
+    if(e.outcomeId==="look") return "👀";
+    if(e.outcomeId==="swing") return "🏏";
+    if(e.outcomeId==="foul") return "⚾";
+    if(e.outcomeId==="ball") return "·";
+    if(e.outcomeId==="walk") return "🚶";
+    if(e.outcomeId==="hbp") return "🩹";
+    if(e.isOut) return "✓";
+    if(e.onBase) return "H";
+    return "·";
+  };
+
+  if(selected!==null){
+    const batter=lineup?lineup[selected]:null;
+    const name=batter?.name||`Batter ${selected+1}`;
+    const log=batterLog[name]||[];
+    const outs=log.filter(e=>e.isOut).length;
+    const hits=log.filter(e=>e.onBase).length;
+    const ks=log.filter(e=>e.outcomeId==="look"||e.outcomeId==="swing").length;
+    const bb=log.filter(e=>e.outcomeId==="walk").length;
+
+    return(
+      <div style={{padding:"16px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+          <button onClick={()=>setSelected(null)} style={{...S.ghostBtn,padding:"4px 10px"}}>← Back</button>
+          <div>
+            <div style={{fontSize:14,fontWeight:800,color:C.text}}>{name}</div>
+            <div style={{fontSize:11,color:C.textSoft,fontWeight:600}}>
+              {batter?.bat==="S"?"Switch":batter?.bat==="L"?"LHB":"RHB"} · {log.length} pitches seen
+            </div>
+          </div>
+        </div>
+
+        {/* Summary stats */}
+        {log.length>0&&(
+          <div style={{display:"flex",gap:10,marginBottom:14}}>
+            {[["Pitches",log.length],["Outs",outs],["Hits",hits],["K",ks],["BB",bb]].map(([lbl,val])=>(
+              <div key={lbl} style={{flex:1,background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"8px 4px",textAlign:"center"}}>
+                <div style={{fontSize:16,fontWeight:800,color:C.green}}>{val}</div>
+                <div style={{fontSize:9,color:C.textSoft,fontWeight:700,textTransform:"uppercase"}}>{lbl}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Pitch-by-pitch chart */}
+        {log.length===0?(
+          <div style={S.emptyState}>No pitches logged for this batter yet.</div>
+        ):(
+          <>
+            <div style={S.sectionLabel}>Pitch Chart</div>
+            <div style={{...S.card,padding:"10px 8px"}}>
+              {log.map((e,i)=>{
+                const col=PITCH_COLORS[e.pitch]||C.textMid;
+                const oc=outcomeColor(e);
+                return(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 4px",
+                    borderBottom:`1px solid ${C.border}`}}>
+                    <div style={{width:18,height:18,borderRadius:"50%",background:col,
+                      display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      <span style={{fontSize:8,fontWeight:800,color:"#fff"}}>{i+1}</span>
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.pitch}</div>
+                      <div style={{fontSize:9,color:C.textSoft,fontWeight:500}}>
+                        {e.balls!==undefined?`${e.balls}-${e.strikes}`:"--"} · Zone {e.zone||"—"}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:10,fontWeight:800,color:oc}}>{outcomeIcon(e)}</div>
+                      <div style={{fontSize:9,color:oc,fontWeight:600,maxWidth:80,textAlign:"right"}}>{e.outcome}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return(
     <div style={{padding:"16px"}}>
-      {/* Heatmap */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-        <div style={S.sectionLabel}>Zone Heatmap <span style={{fontWeight:500,color:C.textSoft}}>({gameLog.length} pitches)</span></div>
-        <div style={{display:"flex",gap:8,fontSize:10,fontWeight:700}}>
-          <span style={{color:"rgba(180,30,30,0.9)"}}>🔴 Pound it</span>
-          <span style={{color:C.blue}}>🔵 Avoid</span>
-        </div>
-      </div>
-      <div style={S.card}>
-        {gameLog.length===0?(
-          <div style={{color:C.textSoft,fontSize:12,textAlign:"center",padding:20,fontWeight:500}}>No pitches logged yet</div>
-        ):(
-          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3}}>
-            {Array.from({length:25},(_,idx)=>{
-              const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
-              const d=zoneData[id],inZone=row>=1&&row<=3&&col>=1&&col<=3;
-              const bg=zoneColor(id)||(inZone?C.white:C.surface);
-              return(
-                <div key={id} onClick={()=>setSelectedZoneInfo(selectedZoneInfo===id?null:id)} style={{
-                  height:44,borderRadius:6,cursor:d?"pointer":"default",
-                  background:bg,border:`1.5px solid ${selectedZoneInfo===id?C.text:C.border}`,
-                  display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",
-                }}>
-                  {d&&<span style={{fontSize:10,fontWeight:800,color:C.text}}>{d.total}</span>}
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {/* Zone drill-down */}
-        {selectedZoneInfo&&zoneData[selectedZoneInfo]&&(()=>{
-          const d=zoneData[selectedZoneInfo];
+      <div style={S.sectionLabel}>Lineup</div>
+      {(!lineup||lineup.every(b=>!b.name))?(
+        <div style={S.emptyState}>No lineup set. Add batters in Setup.</div>
+      ):(
+        (lineup||[]).map((b,i)=>{
+          const name=b.name||`Batter ${i+1}`;
+          const log=batterLog[name]||[];
+          const isCurrent=i===batterIdx;
+          const outs=log.filter(e=>e.isOut).length;
+          const hits=log.filter(e=>e.onBase).length;
           return(
-            <div style={{marginTop:10,padding:"10px 12px",background:C.surface,borderRadius:8}}>
-              <div style={{fontWeight:800,fontSize:12,color:C.text,marginBottom:6}}>{zoneLabel(selectedZoneInfo)} — {d.total} pitch{d.total!==1?"es":""}</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginBottom:8}}>
-                {[["Outs",d.outs,C.green],["On Base",d.onBase,C.warn],["Fouls",d.fouls,C.gold],["Balls",d.balls,C.textSoft]].map(([lbl,val,col])=>(
-                  <div key={lbl} style={{background:C.white,borderRadius:6,padding:"6px 10px",display:"flex",justifyContent:"space-between"}}>
-                    <span style={{fontSize:11,color:C.textSoft,fontWeight:600}}>{lbl}</span>
-                    <span style={{fontSize:12,fontWeight:800,color:col}}>{val}</span>
-                  </div>
-                ))}
+            <div key={i} onClick={()=>setSelected(i)} style={{
+              background:isCurrent?C.greenDim:C.white,
+              border:`1.5px solid ${isCurrent?C.greenMid:C.border}`,
+              borderRadius:10,padding:"10px 14px",marginBottom:6,cursor:"pointer",
+              display:"flex",alignItems:"center",gap:10,
+            }}>
+              <div style={{
+                width:24,height:24,borderRadius:"50%",flexShrink:0,
+                background:isCurrent?C.green:C.surface,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                border:`1.5px solid ${isCurrent?C.green:C.border}`,
+              }}>
+                <span style={{fontSize:11,fontWeight:800,color:isCurrent?"#fff":C.textMid}}>{i+1}</span>
               </div>
-              <div style={{fontSize:10,color:C.textSoft,fontWeight:600,marginBottom:4}}>Pitches thrown here:</div>
-              {d.pitches.map((e,i)=>(
-                <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderTop:`1px solid ${C.border}`}}>
-                  <span style={{fontSize:11,fontWeight:700,color:C.text}}>{e.pitch}</span>
-                  <span style={{fontSize:11,color:e.isOut?C.green:e.onBase?C.warn:C.textSoft,fontWeight:600}}>{e.outcome}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.text}}>{name}</div>
+                <div style={{fontSize:10,color:C.textSoft,fontWeight:600}}>
+                  {b.bat==="S"?"Switch":b.bat==="L"?"LHB":"RHB"}
+                  {log.length>0&&<span style={{marginLeft:8}}>{log.length}p · {outs}K+out · {hits}H</span>}
                 </div>
-              ))}
+              </div>
+              {isCurrent&&<span style={{fontSize:10,fontWeight:800,color:C.green}}>▶ UP</span>}
+              {log.length>0&&<span style={{fontSize:10,color:C.textSoft}}>→</span>}
             </div>
           );
-        })()}
-      </div>
+        })
+      )}
     </div>
   );
 }
@@ -1828,8 +2016,7 @@ function StatsTab({user,onBack}){
   const [view,setView]=useState("pitcher");
   const [selected,setSelected]=useState(null);
   useEffect(()=>{loadAllPitchLog(user).then(d=>{setAllLog(d);setLoading(false);});},[user]);
-  if(loading) return <div style={S.emptyState}>Loading stats...</div>;
-  if(allLog.length===0) return <div style={S.emptyState}>No data yet. Play and save some games first.</div>;
+
   const pct=(n,d)=>d>0?Math.round((n/d)*100):0;
 
   const pitcherStats=useMemo(()=>{
@@ -1890,6 +2077,24 @@ function StatsTab({user,onBack}){
   },[allLog]);
 
   const VIEWS=[{id:"pitcher",label:"Pitcher"},{id:"batter",label:"Batters"},{id:"count",label:"Counts"},{id:"zone",label:"Zones"}];
+
+  // Early returns AFTER all hooks
+  if(loading) return(
+    <div style={{padding:"16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+        <button onClick={onBack} style={{...S.ghostBtn,padding:"4px 10px",fontSize:11}}>← Back</button>
+      </div>
+      <div style={S.emptyState}>Loading stats...</div>
+    </div>
+  );
+  if(allLog.length===0) return(
+    <div style={{padding:"16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+        <button onClick={onBack} style={{...S.ghostBtn,padding:"4px 10px",fontSize:11}}>← Back</button>
+      </div>
+      <div style={S.emptyState}>No data yet. Play and save some games first.</div>
+    </div>
+  );
 
   return(
     <div style={{padding:"0"}}>
@@ -2207,7 +2412,7 @@ function App(){
   },[session,user]);
 
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
-  const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"},{id:"history",label:"History"}];
+  const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"lineup",label:"Lineup"},{id:"log",label:"Log"},{id:"history",label:"History"}];
 
   if(!user) return <LoginScreen onLogin={setUser}/>;
 
@@ -2278,7 +2483,7 @@ function App(){
           ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame} onUndo={handleUndo} onSetBalls={handleSetBalls} onSetStrikes={handleSetStrikes}/>
           :<div style={S.emptyState}>Complete setup first.</div>
         )}
-        {tab==="visuals"&&(session?<VisualsTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
+        {tab==="lineup"&&(session?<LineupTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
         {tab==="log"&&(session
           ?<div>
             <LogTab session={session}/>
