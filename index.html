@@ -192,20 +192,26 @@ function setPalette(key){
 }
 // Apply initial palette to body
 document.body.style.background=_palette.bg;
-// Map legacy C references to palette
-const C = new Proxy({},{
-  get(_,k){
-    const p=_palette;
-    const map={
-      bg:p.bg, surface:p.surface, border:p.border,
-      green:p.primary, greenMid:p.primaryMid, greenLight:p.primaryLight, greenDim:p.primaryDim,
-      text:p.text, textMid:p.textMid, textSoft:p.textSoft,
-      warn:p.warn, warnLight:p.warnLight, gold:p.gold, goldLight:p.goldLight,
-      blue:p.blue, blueLight:p.blueLight, white:p.white,
-    };
-    return map[k]??p[k];
-  }
-});
+// C uses getter properties so it always reads the current palette live
+const C = {
+  get bg(){ return _palette.bg; },
+  get surface(){ return _palette.surface; },
+  get border(){ return _palette.border; },
+  get green(){ return _palette.primary; },
+  get greenMid(){ return _palette.primaryMid; },
+  get greenLight(){ return _palette.primaryLight; },
+  get greenDim(){ return _palette.primaryDim; },
+  get text(){ return _palette.text; },
+  get textMid(){ return _palette.textMid; },
+  get textSoft(){ return _palette.textSoft; },
+  get warn(){ return _palette.warn; },
+  get warnLight(){ return _palette.warnLight; },
+  get gold(){ return _palette.gold; },
+  get goldLight(){ return _palette.goldLight; },
+  get blue(){ return _palette.blue; },
+  get blueLight(){ return _palette.blueLight; },
+  get white(){ return _palette.white; },
+};
 
 // ─── MLB The Show API helpers ─────────────────────────────────────────────────
 // Normalise pitch name from API to our internal names
@@ -365,7 +371,11 @@ async function randomLineupFromApi(){
       });
       if(hitters.length>0){
         const pick=hitters[Math.floor(Math.random()*hitters.length)];
-        results.push({name:pick.name,bat:pick.bat_hand||"R",custom:false,ovr:pick.ovr||pick.new_rank||0,uuid:pick.uuid||""});
+        // Try multiple field names the API might use for batting hand
+        const batHand=pick.bat_hand||pick.batting_hand||pick.bat||null;
+        // Only accept valid values R/L/S
+        const validBat=["R","L","S"].includes(batHand)?batHand:null;
+        results.push({name:pick.name,bat:validBat||"R",custom:false,ovr:pick.ovr||pick.new_rank||0,uuid:pick.uuid||""});
       }
     }catch(e){}
   }
@@ -633,23 +643,24 @@ function ZoneGridWithTrail({onSelect,selected,recommended,pitchType,pitcherHand,
   const trailSvg=useMemo(()=>{
     if(!pitchType||!pitcherHand) return null;
     const mv=getMovement(pitchType,velo||90,pitcherHand);
-    // Grid is ~5 cols x 5 rows. Map movement to grid coordinates
-    // h: positive = arm side. From catcher view: RHP arm side = right (col 4), LHP arm side = left (col 0)
-    // For RHP: positive h moves right (+col), negative h moves left (-col)
-    // For LHP: movement is already flipped by getMovement
-    // Grid cell size ~20% each. Center of grid = col 2, row 2
-    // Scale: 20in movement ~ 1 cell width
-    const hCells = mv.h / 10; // cells of horizontal movement
-    const vCells = -mv.v / 10; // cells of vertical (negative = upward on grid)
+    // From catcher view:
+    // RHP arm side = right side (positive X). Glove side = left (negative X).
+    // PITCH_PROFILES h: negative = glove side for RHP.
+    // To show break direction visually from catcher: flip sign so glove-side = right visually
+    // i.e. RHP slider (h=-8 glove side) should show arrow going RIGHT (away from RHH)
+    const hFlipped = -mv.h; // flip so that "away from RHH" = right from catcher
+    const scale = 3.5; // % per inch of break
+    const hPct = hFlipped * scale;
+    const vPct = -mv.v * scale; // negative v = drop = downward on grid
 
-    // Start = center-top of grid (release point approximation)
-    // End = where ball ends up relative to center
-    const startX = 50; // percent
-    const startY = 5;  // top
-    const endX = Math.min(95,Math.max(5, 50 + hCells * 20));
-    const endY = Math.min(95,Math.max(5, 50 + vCells * 20));
-
-    return {startX,startY,endX,endY,color:PITCH_PROFILES[pitchType]?.type==="fastball"?"#e74c3c":PITCH_PROFILES[pitchType]?.type==="breaking"?"#2980b9":"#27ae60"};
+    // Arrow starts at center of zone (50%, 50%) and points in break direction
+    const startX = 50;
+    const startY = 35; // slightly above center (pitcher release side)
+    const endX = Math.min(92, Math.max(8, startX + hPct));
+    const endY = Math.min(92, Math.max(8, startY + vPct + 20)); // add 20 for forward travel
+    const prof = PITCH_PROFILES[pitchType];
+    const color = prof?.type==="fastball" ? "#e74c3c" : prof?.type==="breaking" ? "#2980b9" : "#27ae60";
+    return {startX, startY, endX, endY, color};
   },[pitchType,pitcherHand,velo]);
 
   return(
@@ -800,7 +811,7 @@ function LineupSetup({onSave,initialLineup}){
               {BAT_OPTS.map(o=>(
                 <button key={o.val} onClick={()=>updateSlot(i,"bat",o.val)} style={{
                   padding:"4px 7px",borderRadius:5,fontSize:10,fontWeight:700,
-                  fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+                  fontFamily:"'Neuton','Nunito',serif",cursor:"pointer",
                   background:slot.bat===o.val?C.green:C.surface,
                   color:slot.bat===o.val?"#fff":C.textMid,
                   border:`1px solid ${slot.bat===o.val?C.green:C.border}`,
@@ -867,7 +878,7 @@ function GameTypeScreen({onSelect}) {
           {TYPES.map(t=>(
             <button key={t.id} onClick={()=>onSelect(t)} style={{
               width:"100%",padding:"20px 24px",background:t.color,border:"none",borderRadius:14,
-              cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+              cursor:"pointer",fontFamily:"'Neuton','Nunito',serif",
               display:"flex",justifyContent:"space-between",alignItems:"center",
               boxShadow:`0 4px 12px ${t.color}55`,
             }}>
@@ -928,7 +939,7 @@ function SetupTab({onComplete,onViewStats}){
       <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:10}}>
         <button onClick={onViewStats} style={{
           padding:"12px 28px",background:"#b5811b",border:"none",borderRadius:12,
-          color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+          color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Neuton','Nunito',serif",
           boxShadow:"0 4px 12px rgba(181,129,27,0.4)",
         }}>📊 View Stats</button>
       </div>
@@ -982,7 +993,7 @@ function SetupTab({onComplete,onViewStats}){
       <div style={{display:"flex",borderBottom:`1.5px solid ${C.border}`,background:C.white}}>
         {["pitcher","lineup"].map(v=>(
           <button key={v} onClick={()=>setView(v)} style={{
-            flex:1,padding:"10px",fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+            flex:1,padding:"10px",fontSize:11,fontWeight:700,fontFamily:"'Neuton','Nunito',serif",
             background:"none",border:"none",borderBottom:`2px solid ${view===v?C.greenMid:"transparent"}`,
             color:view===v?C.green:C.textSoft,cursor:"pointer",textTransform:"uppercase",letterSpacing:"0.06em",
           }}>{v==="pitcher"?"My Pitcher":"Opp. Lineup"}</button>
@@ -1685,13 +1696,13 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
         <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:10,marginBottom:10}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
             <div style={{fontSize:10,fontWeight:800,color:C.textSoft,textTransform:"uppercase",letterSpacing:"0.08em"}}>Substitution</div>
-            <button onClick={()=>{setShowSub(false);setSubQuery("");setSubSlot(null);}} style={{fontSize:10,background:"none",border:"none",cursor:"pointer",color:C.textSoft,fontFamily:"'Nunito',sans-serif"}}>✕</button>
+            <button onClick={()=>{setShowSub(false);setSubQuery("");setSubSlot(null);}} style={{fontSize:10,background:"none",border:"none",cursor:"pointer",color:C.textSoft,fontFamily:"'Neuton','Nunito',serif"}}>✕</button>
           </div>
           {/* Slot selector */}
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
             {lineup&&lineup.map((b,i)=>(
               <button key={i} onClick={()=>{setSubSlot(i);setSubQuery("");setSubApiResults([]);}} style={{
-                padding:"4px 8px",borderRadius:6,fontSize:10,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+                padding:"4px 8px",borderRadius:6,fontSize:10,fontWeight:700,fontFamily:"'Neuton','Nunito',serif",
                 background:subSlot===i?C.green:C.surface,color:subSlot===i?"#fff":C.textMid,
                 border:`1px solid ${subSlot===i?C.green:C.border}`,cursor:"pointer",
               }}>{i+1}. {b.name||"—"}</button>
@@ -1813,7 +1824,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
         <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
           {[["first","1st"],["second","2nd"]].map(([b,lbl])=>currentBases[b]&&(
             <button key={b} onClick={()=>toggleFast(b)} style={{
-              padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+              padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,fontFamily:"'Neuton','Nunito',serif",
               background:currentBases[b].fast?"#fdf3dc":C.surface,
               color:currentBases[b].fast?C.gold:C.textSoft,
               border:`1.5px solid ${currentBases[b].fast?C.gold:C.border}`,cursor:"pointer",
@@ -1884,7 +1895,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
               ["scored","Scored ✓"],
             ].map(([id,lbl])=>(
               <button key={id} onClick={()=>handleRunnerAdvanceOnHit(id)} style={{
-                padding:"10px 12px",borderRadius:8,fontFamily:"'Nunito',sans-serif",fontSize:12,fontWeight:700,cursor:"pointer",textAlign:"left",
+                padding:"10px 12px",borderRadius:8,fontFamily:"'Neuton','Nunito',serif",fontSize:12,fontWeight:700,cursor:"pointer",textAlign:"left",
                 border:`1.5px solid ${id==="scored"?C.green:C.border}`,
                 background:id==="scored"?C.greenLight:C.surface,
                 color:id==="scored"?C.green:C.text,
@@ -1903,7 +1914,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
             </div>
             <button onClick={()=>{resetContactFlow();setSelectedZone(null);}} style={{
               fontSize:10,color:C.textSoft,background:"none",border:`1px solid ${C.border}`,
-              borderRadius:5,padding:"2px 8px",cursor:"pointer",fontFamily:"'Nunito',sans-serif",fontWeight:600,
+              borderRadius:5,padding:"2px 8px",cursor:"pointer",fontFamily:"'Neuton','Nunito',serif",fontWeight:600,
             }}>✕ Cancel</button>
           </div>
 
@@ -1915,7 +1926,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
                 {[["gb","Ground Ball"],["ld","Line Drive"],["fb","Fly Ball"]].map(([id,lbl])=>(
                   <button key={id} onClick={()=>setContactClass(id)} style={{
                     padding:"11px 6px",borderRadius:8,border:`1.5px solid ${C.border}`,background:C.surface,
-                    color:C.text,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+                    color:C.text,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Neuton','Nunito',serif",
                   }}>{lbl}</button>
                 ))}
               </div>
@@ -1931,7 +1942,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
                 {[["out","Out ✓"],["single","Single"],["double","Double"],["triple","Triple"],["hr","HR 🏠"],["error","Error"],["fc","FC"]].map(([id,lbl])=>(
                   <button key={id} onClick={()=>handleHitResult(id)} style={{
-                    padding:"10px 4px",borderRadius:8,fontFamily:"'Nunito',sans-serif",fontSize:11,fontWeight:800,cursor:"pointer",
+                    padding:"10px 4px",borderRadius:8,fontFamily:"'Neuton','Nunito',serif",fontSize:11,fontWeight:800,cursor:"pointer",
                     border:`1.5px solid ${id==="out"?C.green:id==="error"?C.gold:C.warn}`,
                     background:id==="out"?C.greenLight:id==="error"?C.goldLight:C.warnLight,
                     color:id==="out"?C.green:id==="error"?C.gold:C.warn,
@@ -1940,7 +1951,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
               </div>
               <button onClick={()=>setContactClass(null)} style={{
                 fontSize:10,color:C.textSoft,background:"none",border:"none",cursor:"pointer",
-                fontFamily:"'Nunito',sans-serif",fontWeight:600,padding:0,
+                fontFamily:"'Neuton','Nunito',serif",fontWeight:600,padding:0,
               }}>← Back to contact type</button>
             </>
           )}
@@ -2070,7 +2081,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
             {OUTCOMES.map(oc=>(
               <button key={oc.id} onClick={()=>handleOutcome(oc)} disabled={!selectedZone} style={{
-                padding:"12px 6px",borderRadius:9,fontFamily:"'Nunito',sans-serif",
+                padding:"12px 6px",borderRadius:9,fontFamily:"'Neuton','Nunito',serif",
                 background:!selectedZone?"#f0ede7":C.white,
                 border:`1.5px solid ${!selectedZone?C.border:oc.color}`,
                 color:!selectedZone?C.textSoft:oc.color,
@@ -2337,26 +2348,26 @@ function LogTab({session}){
   );
 }
 const S={
-  root:{background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",fontFamily:"'Nunito',sans-serif",color:C.text},
+  root:{background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",fontFamily:"'Neuton','Nunito',serif",color:C.text},
   header:{padding:"16px",background:_palette.header||C.green},
   headerTitle:{fontSize:18,fontWeight:800,color:_palette.headerText||"#fff"},
   headerSub:{fontSize:11,color:"rgba(255,255,255,0.6)",fontWeight:500,marginTop:1},
   tabBar:{display:"flex",background:C.white,borderBottom:`2px solid ${C.border}`},
-  tabOn:{flex:1,padding:"11px 0",fontSize:12,fontWeight:800,fontFamily:"'Nunito',sans-serif",background:"none",border:"none",borderBottom:`3px solid ${C.green}`,color:C.green,cursor:"pointer",marginBottom:-2},
-  tabOff:{flex:1,padding:"11px 0",fontSize:12,fontWeight:600,fontFamily:"'Nunito',sans-serif",background:"none",border:"none",borderBottom:"3px solid transparent",color:C.textSoft,cursor:"pointer",marginBottom:-2},
+  tabOn:{flex:1,padding:"11px 0",fontSize:12,fontWeight:800,fontFamily:"'Neuton','Nunito',serif",background:"none",border:"none",borderBottom:`3px solid ${C.green}`,color:C.green,cursor:"pointer",marginBottom:-2},
+  tabOff:{flex:1,padding:"11px 0",fontSize:12,fontWeight:600,fontFamily:"'Neuton','Nunito',serif",background:"none",border:"none",borderBottom:"3px solid transparent",color:C.textSoft,cursor:"pointer",marginBottom:-2},
   content:{overflowY:"auto"},
   label:{fontSize:11,fontWeight:700,color:C.textSoft,letterSpacing:"0.04em",marginBottom:8,textTransform:"uppercase"},
   sectionLabel:{fontSize:10,fontWeight:800,color:C.textSoft,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8},
-  input:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Nunito',sans-serif",fontWeight:600,outline:"none"},
-  toggleOn:{padding:"9px 22px",background:C.green,color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
-  toggleOff:{padding:"9px 22px",background:C.white,color:C.textMid,border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  input:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:8,padding:"10px 12px",fontSize:13,fontFamily:"'Neuton','Nunito',serif",fontWeight:600,outline:"none"},
+  toggleOn:{padding:"9px 22px",background:C.green,color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Neuton','Nunito',serif"},
+  toggleOff:{padding:"9px 22px",background:C.white,color:C.textMid,border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'Neuton','Nunito',serif"},
   pitchRow:{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"9px 12px",marginBottom:6},
-  select:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:7,padding:"8px 10px",fontSize:13,fontFamily:"'Nunito',sans-serif",fontWeight:600,outline:"none"},
-  veloInput:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:7,padding:"7px 8px",fontSize:13,width:52,fontFamily:"'Nunito',sans-serif",fontWeight:700,textAlign:"center",outline:"none"},
-  removeBtn:{background:"none",border:"none",color:C.textSoft,cursor:"pointer",fontSize:13,padding:"2px 4px",fontFamily:"'Nunito',sans-serif"},
-  ghostBtn:{background:"none",border:`1.5px solid ${C.greenMid}`,color:C.greenMid,borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
-  primaryBtn:{width:"100%",padding:"14px",background:C.green,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
-  secondaryBtn:{width:"100%",padding:"12px",background:C.white,color:C.textMid,border:`1.5px solid ${C.border}`,borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif"},
+  select:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:7,padding:"8px 10px",fontSize:13,fontFamily:"'Neuton','Nunito',serif",fontWeight:600,outline:"none"},
+  veloInput:{background:C.white,border:`1.5px solid ${C.border}`,color:C.text,borderRadius:7,padding:"7px 8px",fontSize:13,width:52,fontFamily:"'Neuton','Nunito',serif",fontWeight:700,textAlign:"center",outline:"none"},
+  removeBtn:{background:"none",border:"none",color:C.textSoft,cursor:"pointer",fontSize:13,padding:"2px 4px",fontFamily:"'Neuton','Nunito',serif"},
+  ghostBtn:{background:"none",border:`1.5px solid ${C.greenMid}`,color:C.greenMid,borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Neuton','Nunito',serif"},
+  primaryBtn:{width:"100%",padding:"14px",background:C.green,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'Neuton','Nunito',serif"},
+  secondaryBtn:{width:"100%",padding:"12px",background:C.white,color:C.textMid,border:`1.5px solid ${C.border}`,borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'Neuton','Nunito',serif"},
   countBar:{display:"flex",alignItems:"center",background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 16px",marginBottom:12},
   countNum:{fontSize:30,fontWeight:800,color:C.text,lineHeight:1},
   countLabel:{fontSize:13,fontWeight:600,color:C.textSoft},
@@ -2430,7 +2441,7 @@ class StatsErrorBoundary extends React.Component{
           <div style={{fontSize:14,fontWeight:800,color:"#b5451b",marginBottom:8}}>Stats failed to load</div>
           <div style={{fontSize:12,color:"#8a9e93",marginBottom:16}}>{String(this.state.error.message||this.state.error)}</div>
           <button onClick={()=>{this.setState({error:null});if(this.props.onBack) this.props.onBack();}}
-            style={{padding:"10px 20px",background:"#2d6a4f",color:"#fff",border:"none",borderRadius:8,fontFamily:"'Nunito',sans-serif",fontWeight:700,cursor:"pointer"}}>
+            style={{padding:"10px 20px",background:"#2d6a4f",color:"#fff",border:"none",borderRadius:8,fontFamily:"'Neuton','Nunito',serif",fontWeight:700,cursor:"pointer"}}>
             ← Go Back
           </button>
         </div>
@@ -2598,7 +2609,7 @@ function StatsTab({user,onBack}){
     <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
       {Object.entries(SORT_OPTS).map(([k,v])=>(
         <button key={k} onClick={()=>setSort(k)} style={{
-          padding:"3px 8px",borderRadius:6,fontSize:10,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+          padding:"3px 8px",borderRadius:6,fontSize:10,fontWeight:700,fontFamily:"'Neuton','Nunito',serif",
           background:sort===k?C.green:C.surface,color:sort===k?"#fff":C.textMid,
           border:`1px solid ${sort===k?C.green:C.border}`,cursor:"pointer",
         }}>{v.label}</button>
@@ -2620,7 +2631,7 @@ function StatsTab({user,onBack}){
       <div style={{display:"flex",borderBottom:`1.5px solid ${C.border}`,background:C.white,overflowX:"auto"}}>
         {VIEWS.map(v=>(
           <button key={v.id} onClick={()=>{setView(v.id);setSelected(null);setSearch("");}} style={{
-            flex:"0 0 auto",padding:"10px 12px",fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+            flex:"0 0 auto",padding:"10px 12px",fontSize:11,fontWeight:700,fontFamily:"'Neuton','Nunito',serif",
             background:"none",border:"none",borderBottom:`2px solid ${view===v.id?C.greenMid:"transparent"}`,
             color:view===v.id?C.green:C.textSoft,cursor:"pointer",whiteSpace:"nowrap",
           }}>{v.label}</button>
@@ -2752,7 +2763,7 @@ function StatsTab({user,onBack}){
         {view==="count"&&(<>
           <div style={S.sectionLabel}>By Count</div>
           <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'Nunito',sans-serif"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'Neuton','Nunito',serif"}}>
               <thead>
                 <tr style={{background:C.surface}}>
                   {["Count","N","Out%","K%","BB%","OBP","Hard%","Weak%"].map(h=>(
