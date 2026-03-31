@@ -419,29 +419,77 @@ const COUNT_LEVERAGE = {
   "3-1":{fastball:1.2,breaking:0.8,offspeed:0.9},"3-2":{fastball:1.0,breaking:1.0,offspeed:1.0},
 };
 
+// Zone recommendations now take both pitcher and batter hand into account.
+// Zone id: "row-col", rows 0=high..4=low, cols 0=away..4=inside (from BATTER perspective)
+// For breaking balls: primary direction is arm-side away from batter.
+// RHP vs RHH: slider breaks away (col 0-1), RHP vs LHH: slider breaks inside (col 3-4)
+// LHP vs LHH: slider breaks away (col 0-1), LHP vs RHH: slider breaks inside (col 3-4)
+function getRecZone(pitchType, pitcherHand, batterHand){
+  const sameHand = pitcherHand === batterHand;
+  // away = cols 0-1 from batter; inside = cols 3-4
+  const awayLow = sameHand ? "3-1" : "3-3";   // away from batter = arm side for same hand
+  const awayMid = sameHand ? "2-1" : "2-3";
+  const insideLow = sameHand ? "3-3" : "3-1";
+  const chaseAway = sameHand ? "4-0" : "4-4";
+  const chaseIn = sameHand ? "4-4" : "4-0";
+  switch(pitchType){
+    case "4-Seam FB": return "1-2";          // up in zone, middle
+    case "2-Seam FB": return insideLow;       // runs to arm side low
+    case "Cutter":    return awayLow;         // cuts away from batter
+    case "Sinker":    return insideLow;       // sinks to arm side low
+    case "Slider":    return awayLow;         // breaks away from batter arm side
+    case "Sweeper":   return awayLow;         // sweeps hard away
+    case "Curveball": return "3-2";           // 12-6 drop, middle low
+    case "12-6 Curve":return "4-2";           // chase low middle
+    case "Changeup":  return awayLow;         // fades away arm side
+    case "Splitter":  return "4-2";           // chase low
+    case "Knuckleball":return "2-2";
+    default:          return "2-2";
+  }
+}
+function getChaseZone(pitchType, pitcherHand, batterHand){
+  const sameHand = pitcherHand === batterHand;
+  const chaseAway = sameHand ? "4-0" : "4-4";
+  const chaseIn = sameHand ? "4-4" : "4-0";
+  switch(pitchType){
+    case "4-Seam FB": return sameHand ? "0-3" : "0-1"; // up and in
+    case "2-Seam FB": return chaseIn;
+    case "Cutter":    return chaseAway;
+    case "Sinker":    return chaseIn;
+    case "Slider":    return chaseAway;
+    case "Sweeper":   return chaseAway;
+    case "Curveball": return "4-2";
+    case "12-6 Curve":return "4-2";
+    case "Changeup":  return chaseAway;
+    case "Splitter":  return "4-2";
+    case "Knuckleball":return "4-2";
+    default:          return "4-2";
+  }
+}
+// Keep static tables for backwards compat (used in gameZoneBonus lookup path)
 const ZONE_REC = {
-  "4-Seam FB": {R:"1-3",L:"1-1"},
+  "4-Seam FB": {R:"1-2",L:"1-2"},
   "2-Seam FB": {R:"3-3",L:"3-1"},
-  "Cutter":    {R:"1-1",L:"1-3"},
+  "Cutter":    {R:"3-1",L:"3-3"},
   "Sinker":    {R:"3-3",L:"3-1"},
-  "Slider":    {R:"3-1",L:"3-3"},   // backdoor low
-  "Sweeper":   {R:"3-0",L:"3-4"},
+  "Slider":    {R:"3-1",L:"3-3"},
+  "Sweeper":   {R:"3-1",L:"3-3"},
   "Curveball": {R:"3-2",L:"3-2"},
-  "12-6 Curve":{R:"4-2",L:"4-2"},   // mostly chase, low
-  "Changeup":  {R:"3-3",L:"3-1"},
-  "Splitter":  {R:"4-2",L:"4-2"},   // chase/low
+  "12-6 Curve":{R:"4-2",L:"4-2"},
+  "Changeup":  {R:"3-1",L:"3-3"},
+  "Splitter":  {R:"4-2",L:"4-2"},
   "Knuckleball":{R:"2-2",L:"2-2"},
 };
 const ZONE_CHASE={
   "4-Seam FB": {R:"0-3",L:"0-1"},
-  "2-Seam FB": {R:"4-3",L:"4-1"},
-  "Cutter":    {R:"0-1",L:"0-3"},
-  "Sinker":    {R:"4-3",L:"4-1"},
+  "2-Seam FB": {R:"4-4",L:"4-0"},
+  "Cutter":    {R:"4-0",L:"4-4"},
+  "Sinker":    {R:"4-4",L:"4-0"},
   "Slider":    {R:"4-0",L:"4-4"},
   "Sweeper":   {R:"4-0",L:"4-4"},
   "Curveball": {R:"4-2",L:"4-2"},
   "12-6 Curve":{R:"4-2",L:"4-2"},
-  "Changeup":  {R:"4-3",L:"4-1"},
+  "Changeup":  {R:"4-0",L:"4-4"},
   "Splitter":  {R:"4-2",L:"4-2"},
   "Knuckleball":{R:"4-2",L:"4-2"},
 };
@@ -1111,7 +1159,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       const isBreaking=BREAKING_TYPES.has(p.type);
       const isOffspeed=OFFSPEED_TYPES.has(p.type);
 
-      const recZ=ZONE_REC[p.type]?.[effectiveBatterHand]||"2-2";
+      const recZ=getRecZone(p.type,pitcherHand,effectiveBatterHand);
 
       // No hard caps -- all pitches always shown. Apply score penalties instead.
       // Track consecutive patterns for penalty calculation
@@ -1213,7 +1261,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
   // Deterministic chase decision per at-bat state (use sequence length as seed to avoid re-render flicker)
   const useChase=chaseW>0&&((sequence.length*17+strikes*7)%100)<(chaseW*100);
   const recZone=activePitch
-    ?(useChase?(ZONE_CHASE[activePitch.type]?.[effectiveBatterHand]||"4-2"):(ZONE_REC[activePitch.type]?.[effectiveBatterHand]||"2-2"))
+    ?(useChase?getChaseZone(activePitch.type,pitcherHand,effectiveBatterHand):getRecZone(activePitch.type,pitcherHand,effectiveBatterHand))
     :"2-2";
   const isChaseRec=useChase&&chaseW>0;
   const scoreColor=s=>s>=70?C.green:s>=45?C.gold:C.warn;
@@ -1259,21 +1307,21 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
     const runner=runnersToAdvance[runnerAdvanceIdx];
     const cb=session.bases||{first:null,second:null,third:null};
     const nb={...cb};
-    // Remove from current base
     nb[runner.base]=null;
-    // Place at destination
     if(dest==="adv1"){
       const next={first:"second",second:"third",third:null}[runner.base];
       if(next) nb[next]={name:runner.name,fast:false};
     } else if(dest==="adv2"){
       const next={first:"third",second:null,third:null}[runner.base];
       if(next) nb[next]={name:runner.name,fast:false};
-      // from second or third with adv2 = scores
     } else if(dest==="scored"){
       onAddRun(1);
-      // runner removed, already cleared above
+      // runner cleared above
+    } else if(dest==="out"){
+      // runner put out on basepaths -- counts as additional out, runner removed
+      onAddOut();
     } else {
-      // stayed -- put back
+      // stayed
       nb[runner.base]={name:runner.name,fast:false};
     }
     onUpdateBases(nb);
@@ -1350,19 +1398,36 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       cb.second&&{base:"second",name:cb.second.name||"Runner"},
       cb.third&&{base:"third",name:cb.third.name||"Runner"},
     ].filter(Boolean);
-    const outcomeLabel=`${contactClass?.toUpperCase()||""} — ${result.charAt(0).toUpperCase()+result.slice(1)}`;
+    const outcomeLabel=`${contactClass?.toUpperCase()||""} — ${result==="fc"?"Fielder's Choice":result.charAt(0).toUpperCase()+result.slice(1)}`;
     const isOut=result==="out";
+    const isFC=result==="fc";
     const isError=result==="error";
-    const isHit=!isOut&&!isError;
+    const isHit=!isOut&&!isError&&!isFC;
     onLogPitch({
       pitch:selectedPitch,zone:selectedZone,outcome:outcomeLabel,
       outcomeId:contactPending?.id||"hard",contactClass,hitResult:result,
-      isPositive:isOut,isOut,onBase:isHit||isError,
+      isPositive:isOut||isFC,isOut:isOut,onBase:isHit||isError||isFC,
       batter:currentBatter?.name||"",balls,strikes,inning,
     });
     setSelectedZone(null);setSelectedPitch(null);setHitResult(result);
     if(isOut){
       onAddOut();resetContactFlow();setOutConfirmType("out");triggerOutAdvancement();
+      return;
+    }
+    if(isFC){
+      // Fielder's choice: one runner is out, batter reaches first
+      // Place batter on first, then ask which runner was out (via runnersToAdvance with "out" option)
+      onAddOut();
+      const newBases2={...cb,first:{name:currentBatter?.name||"Batter",fast:false}};
+      onUpdateBases(newBases2);
+      resetContactFlow();
+      // Prompt for which runner was put out (if runners were on base)
+      if(occupied.length>0){
+        setRunnersToAdvance(occupied);setRunnerAdvanceIdx(0);
+        // Using "out" destination to remove runner
+      } else {
+        advanceNext();
+      }
       return;
     }
     // Place batter on base
@@ -1717,10 +1782,14 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
               ["adv1","Advanced 1 base"],
               ["adv2","Advanced 2 bases"],
               ["scored","Scored"],
+              ["out","Out on basepaths ✗"],
             ].map(([id,lbl])=>(
               <button key={id} onClick={()=>handleRunnerAdvance(id)} style={{
-                padding:"10px 12px",borderRadius:8,border:`1.5px solid ${C.border}`,background:C.surface,
-                color:C.text,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif",textAlign:"left",
+                padding:"10px 12px",borderRadius:8,
+                border:`1.5px solid ${id==="out"?C.warn:C.border}`,
+                background:id==="out"?C.warnLight:C.surface,
+                color:id==="out"?C.warn:C.text,
+                fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Neuton','Nunito',serif",textAlign:"left",
               }}>{lbl}</button>
             ))}
           </div>
@@ -1787,7 +1856,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
                 {contactClass==="gb"?"Ground Ball":contactClass==="ld"?"Line Drive":"Fly Ball"} — result
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
-                {[["out","Out ✓"],["single","Single"],["double","Double"],["triple","Triple"],["hr","HR 🏠"],["error","Error"]].map(([id,lbl])=>(
+                {[["out","Out ✓"],["single","Single"],["double","Double"],["triple","Triple"],["hr","HR 🏠"],["error","Error"],["fc","FC"]].map(([id,lbl])=>(
                   <button key={id} onClick={()=>handleHitResult(id)} style={{
                     padding:"10px 4px",borderRadius:8,fontFamily:"'Nunito',sans-serif",fontSize:11,fontWeight:800,cursor:"pointer",
                     border:`1.5px solid ${id==="out"?C.green:id==="error"?C.gold:C.warn}`,
@@ -1986,7 +2055,9 @@ function LineupTab({session}){
                       const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
                       const z=zoneMap[id],inZ=row>=1&&row<=3&&col>=1&&col<=3;
                       // Red = high contact/hits (danger), Blue = high K/weak contact (target)
-                      const contactScore=z?(z.hits+z.hard)/z.total:0;
+                      // contactScore: hard contact rate (danger -- avoid)
+                      // targetScore: K + weak contact rate (target -- throw here)
+                      const contactScore=z?z.hard/z.total:0;
                       const targetScore=z?(z.ks+z.weak)/z.total:0;
                       let bg=inZ?C.white:C.surface;
                       if(z){
@@ -2004,7 +2075,7 @@ function LineupTab({session}){
                           {z&&<>
                             <span style={{fontSize:10,fontWeight:800,color:textColor,lineHeight:1}}>{z.total}</span>
                             <span style={{fontSize:7,color:"rgba(255,255,255,0.85)",lineHeight:1.3}}>
-                              {contactScore>targetScore?`${Math.round(contactScore*100)}%H`:`${Math.round(targetScore*100)}%K`}
+                              {contactScore>targetScore?`${Math.round(contactScore*100)}%HC`:`${Math.round(targetScore*100)}%K`}
                             </span>
                           </>}
                         </div>
@@ -2014,7 +2085,7 @@ function LineupTab({session}){
                 );
               })()}
               <div style={{display:"flex",gap:16,justifyContent:"center"}}>
-                <span style={{fontSize:9,fontWeight:700,color:"rgba(180,30,30,0.9)"}}>🔴 Avoid — high contact/hits</span>
+                <span style={{fontSize:9,fontWeight:700,color:"rgba(180,30,30,0.9)"}}>🔴 Avoid — hard contact</span>
                 <span style={{fontSize:9,fontWeight:700,color:"rgba(26,111,181,0.9)"}}>🔵 Target — K/weak contact</span>
               </div>
             </div>
