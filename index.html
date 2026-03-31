@@ -22,64 +22,60 @@
 <script type="text/babel" data-presets="react" data-plugins="transform-modules-umd">
 const { useState, useCallback, useMemo, useEffect } = React;
 
-// ─── Supabase ─────────────────────────────────────────────────────────────────
 const sb = supabase.createClient("https://giqhacohjkuskljpqzsd.supabase.co", "sb_publishable_uABrRkYvlops5IXCIR3tmA_ey5eCSWn");
 
 const USER_KEY = "pitchiq_user";
-function hashPin(pin) {
-  let h=0; for(let i=0;i<pin.length;i++){h=((h<<5)-h)+pin.charCodeAt(i);h|=0;} return Math.abs(h).toString(36);
-}
-function getStoredUser() { try{return JSON.parse(localStorage.getItem(USER_KEY));}catch(e){return null;} }
-function storeUser(username,pin) { const u={username:username.toLowerCase().trim(),pinHash:hashPin(pin)};localStorage.setItem(USER_KEY,JSON.stringify(u));return u; }
-function clearStoredUser() { localStorage.removeItem(USER_KEY); }
+function hashPin(pin){let h=0;for(let i=0;i<pin.length;i++){h=((h<<5)-h)+pin.charCodeAt(i);h|=0;}return Math.abs(h).toString(36);}
+function getStoredUser(){try{return JSON.parse(localStorage.getItem(USER_KEY));}catch(e){return null;}}
+function storeUser(username,pin){const u={username:username.toLowerCase().trim(),pinHash:hashPin(pin)};localStorage.setItem(USER_KEY,JSON.stringify(u));return u;}
+function clearStoredUser(){localStorage.removeItem(USER_KEY);}
 
-async function validateUser(username, pin) {
-  const pinHash=hashPin(pin); const uname=username.toLowerCase().trim();
+async function validateUser(username,pin){
+  const pinHash=hashPin(pin);const uname=username.toLowerCase().trim();
   const{data,error}=await sb.from("games").select("pin_hash").eq("username",uname).limit(1);
-  if(error) return{ok:true,pinHash,uname};
-  if(!data||data.length===0) return{ok:true,pinHash,uname};
-  if(data[0].pin_hash===pinHash) return{ok:true,pinHash,uname};
+  if(error) return{ok:true};
+  if(!data||data.length===0) return{ok:true};
+  if(data[0].pin_hash===pinHash) return{ok:true};
   return{ok:false};
 }
 
-async function saveGame(session,user) {
-  try {
+async function saveGame(session,user){
+  try{
     const{data:game,error:ge}=await sb.from("games").insert({
-      pitcher_name:session.pitcherName||"Unknown", pitcher_hand:session.pitcherHand||"R",
-      pitcher_ovr:session.pitcherOvr||0, my_score:session.myScore||0, opp_score:session.oppScore||0,
-      innings:session.inning||1, total_pitches:session.gameLog?.length||0,
-      game_log:session.gameLog||[], username:user?.username||"anon", pin_hash:user?.pinHash||"",
+      pitcher_name:session.pitcherName||"Unknown",pitcher_hand:session.pitcherHand||"R",
+      pitcher_ovr:session.pitcherOvr||0,my_score:session.myScore||0,opp_score:session.oppScore||0,
+      innings:session.inning||1,total_pitches:session.gameLog?.length||0,
+      game_log:session.gameLog||[],username:user?.username||"anon",pin_hash:user?.pinHash||"",
     }).select().single();
     if(ge){console.error("Save game error:",ge);return null;}
     if(session.gameLog?.length>0){
       const rows=session.gameLog.map(e=>({
-        game_id:game.id, pitcher_name:session.pitcherName||"Unknown",
-        batter_name:e.batter||"", batter_hand:e.batterHand||"",
-        pitch_type:e.pitch, zone:e.zone, outcome:e.outcome, outcome_id:e.outcomeId,
-        is_out:e.isOut||false, on_base:e.onBase||false,
-        inning:e.inning||1, balls:e.balls||0, strikes:e.strikes||0,
+        game_id:game.id,pitcher_name:session.pitcherName||"Unknown",
+        batter_name:e.batter||"",batter_hand:e.batterHand||"",
+        pitch_type:e.pitch,zone:e.zone,outcome:e.outcome,outcome_id:e.outcomeId,
+        is_out:e.isOut||false,on_base:e.onBase||false,
+        inning:e.inning||1,balls:e.balls||0,strikes:e.strikes||0,
         username:user?.username||"anon",
       }));
       const{error:pe}=await sb.from("pitch_log").insert(rows);
       if(pe) console.error("Save pitches error:",pe);
     }
     return game.id;
-  } catch(e){console.error("saveGame:",e);return null;}
+  }catch(e){console.error("saveGame:",e);return null;}
 }
-
-async function loadGames(user,limit=30) {
+async function loadGames(user,limit=30){
   if(!user) return[];
   const{data,error}=await sb.from("games").select("*").eq("username",user.username).eq("pin_hash",user.pinHash).order("created_at",{ascending:false}).limit(limit);
   if(error){console.error("loadGames:",error);return[];}
   return data||[];
 }
-async function loadPitcherStats(name,user) {
+async function loadPitcherStats(name,user){
   if(!user) return[];
   const{data,error}=await sb.from("pitch_log").select("*").eq("pitcher_name",name).eq("username",user.username);
   if(error){console.error("loadPitcherStats:",error);return[];}
   return data||[];
 }
-async function loadBatterTendencies(name,user) {
+async function loadBatterTendencies(name,user){
   if(!user) return[];
   const{data,error}=await sb.from("pitch_log").select("*").eq("batter_name",name).eq("username",user.username);
   if(error){console.error("loadBatterTendencies:",error);return[];}
@@ -747,7 +743,43 @@ function LineupSetup({onSave}){
 // ─── Setup Tab ────────────────────────────────────────────────────────────────
 const PITCH_TYPES_LIST=PITCH_TYPES;
 
+function GameTypeScreen({onSelect}) {
+  const TYPES = [
+    {id:"ranked", label:"Ranked", sub:"9 innings", color:"#c0392b", hover:"#e74c3c"},
+    {id:"br", label:"Battle Royale", sub:"9 innings", color:"#1a5fa8", hover:"#2980b9"},
+    {id:"event", label:"Event", sub:"6 innings", color:"#6c3483", hover:"#8e44ad"},
+  ];
+  return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px",background:"#f5f2ec"}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:36,marginBottom:8}}>⚾</div>
+          <div style={{fontSize:22,fontWeight:800,color:"#2d6a4f"}}>New Game</div>
+          <div style={{fontSize:13,color:"#8a9e93",marginTop:4,fontWeight:500}}>Select game mode</div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {TYPES.map(t=>(
+            <button key={t.id} onClick={()=>onSelect(t)} style={{
+              width:"100%",padding:"20px 24px",background:t.color,border:"none",borderRadius:14,
+              cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+              display:"flex",justifyContent:"space-between",alignItems:"center",
+              boxShadow:`0 4px 12px ${t.color}55`,
+            }}>
+              <div style={{textAlign:"left"}}>
+                <div style={{fontSize:18,fontWeight:800,color:"#fff"}}>{t.label}</div>
+                <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",fontWeight:500,marginTop:2}}>{t.sub}</div>
+              </div>
+              <div style={{fontSize:24,color:"rgba(255,255,255,0.5)"}}>→</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SetupTab({onComplete}){
+  const [gameType,setGameType]=useState(null);
   const [query,setQuery]=useState("");
   const [batterHand,setBatterHand]=useState("R");
   const [pitches,setPitches]=useState([]);
@@ -759,6 +791,9 @@ function SetupTab({onComplete}){
   const [apiLoading,setApiLoading]=useState(false);
   const [apiError,setApiError]=useState("");
   const proxyReady = true;
+
+  // Show game type screen first
+  if(!gameType) return <GameTypeScreen onSelect={setGameType}/>;
 
   const localResults=useMemo(()=>{
     if(query.length<2) return [];
@@ -922,7 +957,7 @@ function SetupTab({onComplete}){
             🎲 Auto-Generate (Testing)
           </button>
 
-          <button onClick={()=>canStart&&onComplete({pitcherHand,batterHand:effectiveBatterHand,pitches,lineup,batterIdx,setBatterIdx,pitcherName:selectedName||"Custom",pitcherOvr:apiResults.find(r=>r.name===selectedName)?.ovr||0})}
+          <button onClick={()=>canStart&&onComplete({pitcherHand,batterHand:effectiveBatterHand,pitches,lineup,batterIdx,setBatterIdx,pitcherName:selectedName||"Custom",pitcherOvr:apiResults.find(r=>r.name===selectedName)?.ovr||0,gameType:gameType.id,totalInnings:gameType.id==="event"?6:9})}
             style={{...S.primaryBtn,opacity:canStart?1:0.4}} disabled={!canStart}>
             Start Game
           </button>
@@ -971,7 +1006,7 @@ function getFullReason(lastPitch,lastZone,recPitch,recZone,score){
 }
 
 // ─── At-Bat Tab ───────────────────────────────────────────────────────────────
-function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
+function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,onEndGame}){
   const{pitcherHand,pitches,sequence,outcomes,gameLog,lineup,batterIdx,outs,inning,bases}=session;
   const[selectedZone,setSelectedZone]=useState(null);
   const[selectedPitch,setSelectedPitch]=useState(pitches[0].type);
@@ -1013,57 +1048,126 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
     return map;
   },[gameLog]);
 
+  // ─── Scoring Engine ────────────────────────────────────────────────────────
   const scored=useMemo(()=>{
-    // Repetition cap: find how many consecutive fouls on the same pitch at top of sequence
-    const recentSame=(type)=>{
-      let count=0;
-      for(let i=sequence.length-1;i>=0;i--){
-        const e=sequence[i];
-        if(e.pitch===type&&e.outcomeId==="foul") count++;
-        else break;
-      }
-      return count;
+    const FB_TYPES=new Set(["4-Seam FB","2-Seam FB","Sinker","Cutter"]);
+    const BREAKING_TYPES=new Set(["Slider","Sweeper","Curveball","12-6 Curve"]);
+    const OFFSPEED_TYPES=new Set(["Changeup","Splitter","Knuckleball"]);
+
+    // --- FB:Offspeed ratio from arsenal ---
+    const fbCount=pitches.filter(p=>FB_TYPES.has(p.type)).length;
+    const osCount=pitches.filter(p=>!FB_TYPES.has(p.type)).length;
+    // target FB% based on how FB-heavy the arsenal is
+    const targetFbPct=fbCount===0?0.3:osCount===0?0.85:Math.min(0.80,0.40+(fbCount/(fbCount+osCount))*0.45);
+
+    // --- Rolling last-2 tracking (pitch+zone hard cap) ---
+    const last2=sequence.slice(-2);
+    const last3Zones=sequence.slice(-3).map(e=>e.zone).filter(Boolean);
+    const zoneRepeatCapped=(zone)=>{
+      if(last3Zones.length<2) return false;
+      return last3Zones[last3Zones.length-1]===zone&&last3Zones[last3Zones.length-2]===zone;
+    };
+    const pitchZoneCapped=(ptype,zone)=>{
+      if(last2.length<2) return false;
+      return last2[0].pitch===ptype&&last2[0].zone===zone&&last2[1].pitch===ptype&&last2[1].zone===zone;
     };
 
-    // Score differential context
-    const scoreDiff=(session.myScore||0)-(session.oppScore||0);
-    // Behind by 2+: be more aggressive in zone; ahead by 2+: can afford chase pitches more
-    const gameCtx=scoreDiff<=-2?"behind":scoreDiff>=2?"ahead":"tied";
+    // --- Lineup position (for changeup suppression early in lineup) ---
+    const totalBattersRetired=gameLog.filter(e=>e.isOut).length;
+    const timesThroughLineup=Math.floor(totalBattersRetired/9);
 
+    // --- Count context ---
+    const scoreDiff=(session.myScore||0)-(session.oppScore||0);
+    const gameCtx=scoreDiff<=-2?"behind":scoreDiff>=2?"ahead":"tied";
     const chaseWeight=CHASE_WEIGHT[countKey]||0;
-    // Ahead: slightly more chase; behind: slightly less (can't walk guys in)
     const effectiveChaseWeight=gameCtx==="ahead"?Math.min(chaseWeight+0.1,0.7):gameCtx==="behind"?Math.max(chaseWeight-0.1,0):chaseWeight;
+    const currentBases=session.bases||{first:null,second:null,third:null};
+    const stealThreat=!!(currentBases.first?.fast||currentBases.second?.fast);
+
+    // --- Recent FB usage ratio ---
+    const recentWindow=gameLog.slice(-8);
+    const recentFbCount=recentWindow.filter(e=>FB_TYPES.has(e.pitch)).length;
+    const recentFbPct=recentWindow.length>0?recentFbCount/recentWindow.length:targetFbPct;
 
     return pitches.map(p=>{
-      const prof=PITCH_PROFILES[p.type],type=prof?.type||"fastball";
-      const isFastType=type==="fastball";
-      const cm=COUNT_LEVERAGE[countKey]?.[type]||1.0;
-      let score=lastThrown?tunnelScore(lastThrown,p.type,pitches.find(x=>x.type===lastThrown)?.velo||90,p.velo,pitcherHand):60;
-      if(p.type===lastThrown) score-=20;
-      score*=cm;
-      const eff=outcomes[p.type]||0;
-      score+=eff;
-      // Game-specific zone quality bonus
+      const prof=PITCH_PROFILES[p.type];
+      const pitchType=prof?.type||"fastball";
+      const isFB=FB_TYPES.has(p.type);
+      const isBreaking=BREAKING_TYPES.has(p.type);
+      const isOffspeed=OFFSPEED_TYPES.has(p.type);
+
       const recZ=ZONE_REC[p.type]?.[effectiveBatterHand]||"2-2";
-      score+=gameZoneBonus(p.type,recZ,pitcherHand,effectiveBatterHand);
 
-      const zoneCount=pitchZoneHistory[`${p.type}:${recZ}`]||0;
-      const total=gameLog.length;
-      if(zoneCount>0){
-        score-=total<15?zoneCount*6:eff<=0?zoneCount*3:0;
+      // --- HARD CAPS: remove from consideration entirely ---
+      if(zoneRepeatCapped(recZ)) return null;
+      if(pitchZoneCapped(p.type,recZ)) return null;
+
+      // Factor 1: Tunnel score (0-100 scale)
+      let tunnelFactor=lastThrown
+        ?tunnelScore(lastThrown,p.type,pitches.find(x=>x.type===lastThrown)?.velo||90,p.velo,pitcherHand)
+        :60;
+      if(p.type===lastThrown) tunnelFactor-=15;
+      tunnelFactor=Math.max(0,Math.min(100,tunnelFactor));
+
+      // Factor 2: Count leverage (0-100 scale)
+      const cm=COUNT_LEVERAGE[countKey]?.[pitchType]||1.0;
+      let countFactor=50*cm;
+
+      // Sequencing rules from research:
+      // Slider/Sweeper: suppress heavily with 0 strikes (early count mistake)
+      if((p.type==="Slider"||p.type==="Sweeper")&&strikes===0) countFactor*=0.3;
+      // Curveball: boost early in count (0-0, 1-0) to disrupt timing; boost late (2-strike) vs weak spots
+      if((p.type==="Curveball"||p.type==="12-6 Curve")){
+        if(strikes===0&&balls<=1) countFactor*=1.4;
+        if(strikes===2) countFactor*=1.3;
       }
-      // Repetition penalty
-      const consecutiveFouls=recentSame(p.type);
-      if(consecutiveFouls>=3) score-=consecutiveFouls*12;
+      // Changeup: suppress first time through lineup, boost 2nd+ time
+      if((p.type==="Changeup"||p.type==="Splitter")){
+        if(timesThroughLineup===0) countFactor*=0.5;
+        else countFactor*=1.3;
+      }
+      countFactor=Math.max(0,Math.min(100,countFactor));
 
-      // Steal threat: runner on 1st or 2nd flagged fast -> boost fastball frequency
-      const currentBases=session.bases||{first:null,second:null,third:null};
-      const stealThreat=(currentBases.first?.fast||currentBases.second?.fast);
-      if(stealThreat&&isFastType) score+=10;
+      // Factor 3: FB:Offspeed ratio enforcement (0-100 scale)
+      // If we've thrown too many FBs recently, boost offspeed; if too few, boost FB
+      let ratioFactor=50;
+      if(isFB){
+        // Over target: penalize; under target: boost
+        ratioFactor=recentFbPct>targetFbPct
+          ?Math.max(0,50-(recentFbPct-targetFbPct)*200)
+          :Math.min(100,50+(targetFbPct-recentFbPct)*150);
+      } else {
+        // Offspeed/breaking -- inverse of FB ratio pressure
+        ratioFactor=recentFbPct<targetFbPct
+          ?Math.max(0,50-(targetFbPct-recentFbPct)*200)
+          :Math.min(100,50+(recentFbPct-targetFbPct)*150);
+      }
 
-      return{...p,score:Math.round(Math.min(100,Math.max(0,score))),chaseWeight:effectiveChaseWeight,stealThreat:!!stealThreat};
-    }).sort((a,b)=>b.score-a.score);
-  },[pitches,countKey,lastThrown,outcomes,pitcherHand,pitchZoneHistory,gameLog,effectiveBatterHand,sequence,session]);
+      // Factor 4: Zone variety (0-100 scale)
+      const zoneCount=pitchZoneHistory[`${p.type}:${recZ}`]||0;
+      const total=Math.max(1,gameLog.length);
+      const zoneUsagePct=zoneCount/total;
+      const zoneFactor=Math.max(0,100-zoneUsagePct*300);
+
+      // Factor 5: Historical outcomes for this pitch
+      const eff=outcomes[p.type]||0;
+      const outcomeFactor=Math.min(100,50+eff*2);
+
+      // Game zone quality bonus (MLB The Show mechanics)
+      const zoneBonus=gameZoneBonus(p.type,recZ,pitcherHand,effectiveBatterHand);
+
+      // Steal threat: boost fastball
+      const stealBonus=stealThreat&&isFB?15:0;
+
+      // Equal-weight composite score
+      const composite=(tunnelFactor+countFactor+ratioFactor+zoneFactor+outcomeFactor)/5;
+      const finalScore=Math.round(Math.min(100,Math.max(0,composite+zoneBonus*0.3+stealBonus)));
+
+      return{...p,score:finalScore,chaseWeight:effectiveChaseWeight,stealThreat};
+    })
+    .filter(Boolean)
+    .sort((a,b)=>b.score-a.score);
+  },[pitches,countKey,lastThrown,lastZone,outcomes,pitcherHand,pitchZoneHistory,gameLog,effectiveBatterHand,sequence,session,balls,strikes]);
 
   // Active rec drives both the box and the blue baseball
   const activePitch=scored.find(p=>p.type===selectedPitch)||scored[0];
@@ -1226,10 +1330,31 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases}){
     return [];
   };
 
+  const [showEndGame,setShowEndGame]=useState(false);
   const outDots=[0,1,2].map(i=>i<outs);
 
   return(
     <div style={{padding:"14px 16px"}}>
+
+      {/* End game confirmation overlay */}
+      {showEndGame&&(
+        <div style={{background:C.white,border:`2px solid ${C.warn}`,borderRadius:12,padding:"16px",marginBottom:12}}>
+          <div style={{fontWeight:800,fontSize:14,color:C.text,marginBottom:4}}>End game?</div>
+          <div style={{fontSize:12,color:C.textSoft,marginBottom:12,fontWeight:500}}>Choose what to do with this game's data.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <button onClick={()=>{setShowEndGame(false);onEndGame("save");}} style={{...S.primaryBtn,background:C.green}}>Save to History</button>
+            <button onClick={()=>{setShowEndGame(false);onEndGame("discard");}} style={{...S.secondaryBtn,color:C.warn,borderColor:C.warn}}>Discard &amp; Exit</button>
+            <button onClick={()=>setShowEndGame(false)} style={S.ghostBtn}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* End game button */}
+      {!showEndGame&&(
+        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+          <button onClick={()=>setShowEndGame(true)} style={{...S.ghostBtn,fontSize:10,color:C.warn,borderColor:C.warn,padding:"3px 10px"}}>End Game</button>
+        </div>
+      )}
 
       {/* Batter banner */}
       {currentBatter&&(
@@ -1711,12 +1836,11 @@ const S={
 
 
 // ─── Login Screen ─────────────────────────────────────────────────────────────
-function LoginScreen({onLogin}) {
+function LoginScreen({onLogin}){
   const [username,setUsername]=useState("");
   const [pin,setPin]=useState("");
   const [error,setError]=useState("");
   const [checking,setChecking]=useState(false);
-
   const handleSubmit=async()=>{
     const trimmed=username.toLowerCase().trim();
     if(trimmed.length<2){setError("Username must be at least 2 characters.");return;}
@@ -1728,7 +1852,6 @@ function LoginScreen({onLogin}) {
     if(!result.ok){setError("Incorrect PIN for that username.");return;}
     onLogin(storeUser(trimmed,pin));
   };
-
   return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",background:"#f5f2ec"}}>
       <div style={{width:"100%",maxWidth:360}}>
@@ -1754,16 +1877,14 @@ function LoginScreen({onLogin}) {
             {checking?"Checking...":"Get Started"}
           </button>
         </div>
-        <div style={{textAlign:"center",marginTop:12,fontSize:11,color:"#8a9e93",fontWeight:500}}>
-          Same username + PIN on any device = same history
-        </div>
+        <div style={{textAlign:"center",marginTop:12,fontSize:11,color:"#8a9e93",fontWeight:500}}>Same username + PIN on any device = same history</div>
       </div>
     </div>
   );
 }
 
 // ─── History Tab ──────────────────────────────────────────────────────────────
-function HistoryTab({user}) {
+function HistoryTab({user}){
   const [games,setGames]=useState([]);
   const [loading,setLoading]=useState(true);
   const [selected,setSelected]=useState(null);
@@ -1887,6 +2008,7 @@ function App(){
       outs:0,inning:1,myScore:0,oppScore:0,inningLog:[],bases:{first:null,second:null,third:null}});
     setTab("atbat");setSavedId(null);
   },[]);
+
   const handleLogPitch=useCallback((entry)=>{
     setSession(prev=>{
       const no={...prev.outcomes};
@@ -1895,6 +2017,7 @@ function App(){
       return{...prev,sequence:[...prev.sequence,entry],gameLog:[...prev.gameLog,entry],outcomes:no};
     });
   },[]);
+
   const handleAddOut=useCallback(()=>{
     setSession(prev=>{
       const n=prev.outs+1;
@@ -1903,27 +2026,40 @@ function App(){
       return{...prev,outs:n};
     });
   },[]);
+
   const handleScoreSubmit=useCallback(()=>{
     setSession(prev=>({...prev,myScore:prev.myScore+scoreInput.my,oppScore:prev.oppScore+scoreInput.opp,
       inningLog:[...prev.inningLog,{inning:prev.inning-1,my:scoreInput.my,opp:scoreInput.opp}]}));
     setShowScorePrompt(false);
   },[scoreInput]);
+
   const handleNewAtBat=useCallback(()=>{
     setSession(prev=>{
       const v=prev.lineup?prev.lineup.filter(b=>b.name):[];
       return{...prev,sequence:[],batterIdx:v.length>0?(prev.batterIdx+1)%v.length:0};
     });
   },[]);
+
   const handleSub=useCallback((slot,nb)=>setSession(prev=>{
     if(!prev.lineup) return prev;
     const nl=[...prev.lineup];nl[slot]={name:nb.name,bat:nb.bat,custom:false};return{...prev,lineup:nl};
   }),[]);
+
   const handleUpdateBases=useCallback((b)=>setSession(prev=>({...prev,bases:b})),[]);
+
   const handleSaveGame=useCallback(async()=>{
     if(!session||saving) return;
     setSaving(true);const id=await saveGame(session,user);setSaving(false);if(id) setSavedId(id);
   },[session,saving,user]);
+
   const handleLogout=useCallback(()=>{clearStoredUser();setUser(null);},[]);
+
+  const handleEndGame=useCallback(async(action)=>{
+    if(action==="save"&&session){
+      await saveGame(session,user);
+    }
+    setSession(null);setTab("setup");setSavedId(null);
+  },[session,user]);
 
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
   const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"},{id:"history",label:"History"}];
@@ -1994,7 +2130,7 @@ function App(){
       <div style={S.content}>
         {tab==="setup"&&<SetupTab onComplete={handleSetup}/>}
         {tab==="atbat"&&(session
-          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases}/>
+          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame}/>
           :<div style={S.emptyState}>Complete setup first.</div>
         )}
         {tab==="visuals"&&(session?<VisualsTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
