@@ -438,33 +438,35 @@ const COUNT_LEVERAGE = {
 // LHP vs LHH: slider breaks away (col 0-1), LHP vs RHH: slider breaks inside (col 3-4)
 function getRecZone(pitchType, pitcherHand, batterHand){
   const sameHand = pitcherHand === batterHand;
-  // away = cols 0-1 from batter; inside = cols 3-4
-  const awayLow = sameHand ? "3-1" : "3-3";   // away from batter = arm side for same hand
-  const awayMid = sameHand ? "2-1" : "2-3";
-  const insideLow = sameHand ? "3-3" : "3-1";
-  const chaseAway = sameHand ? "4-0" : "4-4";
-  const chaseIn = sameHand ? "4-4" : "4-0";
+  // Catcher's view: RHB stands LEFT. Col 0=left/inside-to-RHH, col 4=right/away-from-RHH
+  // RHP vs RHH (sameHand): slider/sweeper/changeup break AWAY = right side = col 3-4
+  // RHP vs LHH (diffHand): slider breaks TOWARD LHH = right side = col 3-4 (same physical side)
+  // Key: "away" for breaking pitches = col 3 (outer third right), "inside" = col 1 (inner third left)
+  const awayLow  = sameHand ? "3-3" : "3-1";  // away = right for sameHand (RHP vs RHH)
+  const awayMid  = sameHand ? "2-3" : "2-1";
+  const insideLow= sameHand ? "3-1" : "3-3";  // inside = left for sameHand
   switch(pitchType){
-    case "4-Seam FB": return "1-2";          // up in zone, middle
-    case "2-Seam FB": return insideLow;       // runs to arm side low
-    case "Cutter":    return awayLow;         // cuts away from batter
-    case "Sinker":    return insideLow;       // sinks to arm side low
-    case "Slider":    return awayLow;         // breaks away from batter arm side
-    case "Sweeper":   return awayLow;         // sweeps hard away
-    case "Curveball": return "3-2";           // 12-6 drop, middle low
-    case "12-6 Curve":return "4-2";           // chase low middle
-    case "Changeup":  return awayLow;         // fades away arm side
-    case "Splitter":  return "4-2";           // chase low
+    case "4-Seam FB": return "1-2";
+    case "2-Seam FB": return insideLow;
+    case "Cutter":    return awayLow;
+    case "Sinker":    return insideLow;
+    case "Slider":    return awayLow;
+    case "Sweeper":   return awayLow;
+    case "Curveball": return "3-2";
+    case "12-6 Curve":return "4-2";
+    case "Changeup":  return awayLow;
+    case "Splitter":  return "4-2";
     case "Knuckleball":return "2-2";
     default:          return "2-2";
   }
 }
 function getChaseZone(pitchType, pitcherHand, batterHand){
   const sameHand = pitcherHand === batterHand;
-  const chaseAway = sameHand ? "4-0" : "4-4";
-  const chaseIn = sameHand ? "4-4" : "4-0";
+  // Chase zones: further outside the zone in same direction as rec zone
+  const chaseAway = sameHand ? "4-4" : "4-0";  // way outside right for sameHand
+  const chaseIn   = sameHand ? "4-0" : "4-4";
   switch(pitchType){
-    case "4-Seam FB": return sameHand ? "0-3" : "0-1"; // up and in
+    case "4-Seam FB": return sameHand ? "0-1" : "0-3"; // high inside
     case "2-Seam FB": return chaseIn;
     case "Cutter":    return chaseAway;
     case "Sinker":    return chaseIn;
@@ -481,13 +483,17 @@ function getChaseZone(pitchType, pitcherHand, batterHand){
 // Keep static tables for backwards compat (used in gameZoneBonus lookup path)
 const ZONE_REC = {
   "4-Seam FB": {R:"1-2",L:"1-2"},
-  "2-Seam FB": {R:"3-3",L:"3-1"},
-  "Cutter":    {R:"3-1",L:"3-3"},
-  "Sinker":    {R:"3-3",L:"3-1"},
-  "Slider":    {R:"3-1",L:"3-3"},
-  "Sweeper":   {R:"3-1",L:"3-3"},
+  "2-Seam FB": {R:"3-1",L:"3-3"},
+  "Cutter":    {R:"3-3",L:"3-1"},
+  "Sinker":    {R:"3-1",L:"3-3"},
+  "Slider":    {R:"3-3",L:"3-1"},
+  "Sweeper":   {R:"3-3",L:"3-1"},
   "Curveball": {R:"3-2",L:"3-2"},
   "12-6 Curve":{R:"4-2",L:"4-2"},
+  "Changeup":  {R:"3-3",L:"3-1"},
+  "Splitter":  {R:"4-2",L:"4-2"},
+  "Knuckleball":{R:"2-2",L:"2-2"},
+};
   "Changeup":  {R:"3-1",L:"3-3"},
   "Splitter":  {R:"4-2",L:"4-2"},
   "Knuckleball":{R:"2-2",L:"2-2"},
@@ -524,11 +530,12 @@ function gameZoneBonus(pitchType,zoneId,pitcherHand,batterHand){
   const isCutter=pitchType==="Cutter";
   const isCurve=pitchType==="Curveball"||pitchType==="12-6 Curve";
 
-  // Column definitions from batter's perspective:
-  // col 0,1 = away side; col 2 = middle; col 3,4 = inside
-  const isAway=c<=1; const isMid=c===2; const isInside=c>=3;
+  // Catcher's view: RHB on LEFT. Col 0=left=inside-to-RHH, col 4=right=away-from-RHH
+  // For sameHand (RHP vs RHH): away = col 3-4 (right), inside = col 0-1 (left)
+  // isAway/isInside are from RHH perspective (most common case)
+  const isAway=c>=3; const isMid=c===2; const isInside=c<=1;
   const isHigh=r<=1; const isMidV=r===2; const isLow=r>=3;
-  const isWayInside=c===4; const isWayAway=c===0;
+  const isWayInside=c===0; const isWayAway=c===4;
 
   let bonus=0;
 
@@ -2019,7 +2026,23 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
             {pitcherHand==="L"?"← LHP":"RHP →"}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:4}}>
-            {/* Batter hand label left */}
+            {/* RHB silhouette on LEFT, LHB silhouette on RIGHT */}
+            {effectiveBatterHand!=="L"&&(
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",width:36,flexShrink:0}}>
+                <svg width="34" height="80" viewBox="0 0 34 80" style={{display:"block"}}>
+                  <circle cx="17" cy="8" r="6.5" fill={C.green} opacity="0.85"/>
+                  <rect x="11" y="16" width="12" height="22" rx="3" fill={C.green} opacity="0.85"/>
+                  <rect x="11" y="37" width="5" height="20" rx="2.5" fill={C.greenMid} opacity="0.8"/>
+                  <rect x="17" y="37" width="5" height="18" rx="2.5" fill={C.green} opacity="0.85"/>
+                  <line x1="11" y1="20" x2="4" y2="14" stroke={C.green} strokeWidth="4" strokeLinecap="round" opacity="0.85"/>
+                  <line x1="23" y1="22" x2="30" y2="18" stroke={C.green} strokeWidth="4" strokeLinecap="round" opacity="0.85"/>
+                  <rect x="24" y="11" width="3" height="16" rx="1.5" fill={C.gold} opacity="0.95" transform="rotate(-15,25,19)"/>
+                  <circle cx="25.5" cy="10" r="2" fill={C.gold} opacity="0.95" transform="rotate(-15,25,19)"/>
+                </svg>
+                <div style={{fontSize:9,fontWeight:800,color:C.green,marginTop:2}}>{effectiveBatterHand==="S"?"S":"R"}</div>
+              </div>
+            )}
+            {/* Batter hand label */}
             <div style={{
               writingMode:"vertical-rl",transform:"rotate(180deg)",
               fontSize:9,fontWeight:700,color:C.textMid,
@@ -2028,7 +2051,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
             }}>
               {effectiveBatterHand==="L"?"LHB":"RHB"}
             </div>
-            {/* Zone grid with pitch trail */}
+            {/* Zone grid */}
             <div style={{flex:1,background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:8,position:"relative"}}>
               <ZoneGridWithTrail
                 onSelect={setSelectedZone}
@@ -2041,37 +2064,22 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
               />
               {!selectedZone&&<div style={{color:C.textSoft,fontSize:11,textAlign:"center",marginTop:4,fontWeight:500}}>Tap where you threw it</div>}
             </div>
-            {/* Batter silhouette -- mirrored based on handedness */}
-            <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",width:36,flexShrink:0}}>
-              {(()=>{
-                const isLeft=effectiveBatterHand==="L";
-                // SVG batter silhouette in batting stance, mirrored for LHB
-                return(
-                  <svg width="34" height="80" viewBox="0 0 34 80"
-                    style={{transform:isLeft?"scaleX(-1)":"none",display:"block"}}>
-                    {/* Head */}
-                    <circle cx="17" cy="8" r="6.5" fill={C.green} opacity="0.85"/>
-                    {/* Torso */}
-                    <rect x="11" y="16" width="12" height="22" rx="3" fill={C.green} opacity="0.85"/>
-                    {/* Back leg */}
-                    <rect x="11" y="37" width="5" height="20" rx="2.5" fill={C.greenMid} opacity="0.8"/>
-                    {/* Front leg (slightly forward) */}
-                    <rect x="17" y="37" width="5" height="18" rx="2.5" fill={C.green} opacity="0.85"/>
-                    {/* Back arm holding bat */}
-                    <line x1="11" y1="20" x2="4" y2="14" stroke={C.green} strokeWidth="4" strokeLinecap="round" opacity="0.85"/>
-                    {/* Front arm extending */}
-                    <line x1="23" y1="22" x2="30" y2="18" stroke={C.green} strokeWidth="4" strokeLinecap="round" opacity="0.85"/>
-                    {/* Baseball bat -- horizontal at shoulder height */}
-                    <rect x="24" y="11" width="3" height="16" rx="1.5" fill={C.gold} opacity="0.95" transform="rotate(-15,25,19)"/>
-                    {/* Bat knob */}
-                    <circle cx="25.5" cy="10" r="2" fill={C.gold} opacity="0.95" transform="rotate(-15,25,19)"/>
-                  </svg>
-                );
-              })()}
-              <div style={{fontSize:9,fontWeight:800,color:C.green,marginTop:2}}>
-                {effectiveBatterHand==="S"?"S":effectiveBatterHand}
+            {/* LHB silhouette on RIGHT (mirrored) */}
+            {effectiveBatterHand==="L"&&(
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",width:36,flexShrink:0}}>
+                <svg width="34" height="80" viewBox="0 0 34 80" style={{display:"block",transform:"scaleX(-1)"}}>
+                  <circle cx="17" cy="8" r="6.5" fill={C.green} opacity="0.85"/>
+                  <rect x="11" y="16" width="12" height="22" rx="3" fill={C.green} opacity="0.85"/>
+                  <rect x="11" y="37" width="5" height="20" rx="2.5" fill={C.greenMid} opacity="0.8"/>
+                  <rect x="17" y="37" width="5" height="18" rx="2.5" fill={C.green} opacity="0.85"/>
+                  <line x1="11" y1="20" x2="4" y2="14" stroke={C.green} strokeWidth="4" strokeLinecap="round" opacity="0.85"/>
+                  <line x1="23" y1="22" x2="30" y2="18" stroke={C.green} strokeWidth="4" strokeLinecap="round" opacity="0.85"/>
+                  <rect x="24" y="11" width="3" height="16" rx="1.5" fill={C.gold} opacity="0.95" transform="rotate(-15,25,19)"/>
+                  <circle cx="25.5" cy="10" r="2" fill={C.gold} opacity="0.95" transform="rotate(-15,25,19)"/>
+                </svg>
+                <div style={{fontSize:9,fontWeight:800,color:C.green,marginTop:2}}>L</div>
               </div>
-            </div>
+            )}
           </div>
           {/* Catcher's view label below */}
           <div style={{textAlign:"center",fontSize:9,fontWeight:600,color:C.textSoft,marginTop:3}}>
