@@ -82,6 +82,28 @@ async function loadBatterTendencies(name,user){
   return data||[];
 }
 
+async function deleteGame(gameId){
+  await sb.from("pitch_log").delete().eq("game_id",gameId);
+  await sb.from("games").delete().eq("id",gameId);
+}
+
+async function deleteAllGames(user){
+  if(!user) return;
+  const{data}=await sb.from("games").select("id").eq("username",user.username).eq("pin_hash",user.pinHash);
+  if(data?.length){
+    const ids=data.map(g=>g.id);
+    await sb.from("pitch_log").delete().in("game_id",ids);
+    await sb.from("games").delete().in("id",ids);
+  }
+}
+
+async function loadAllPitchLog(user){
+  if(!user) return[];
+  const{data,error}=await sb.from("pitch_log").select("*").eq("username",user.username);
+  if(error){console.error("loadAllPitchLog:",error);return[];}
+  return data||[];
+}
+
 
 
 
@@ -896,14 +918,20 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
   const[showSub,setShowSub]=useState(false);
   const[subQuery,setSubQuery]=useState("");
   const[subSlot,setSubSlot]=useState(null);
-  const[contactPending,setContactPending]=useState(null);
+  const[contactPending,setContactPending]=useState(null); // {id,label} of hard/weak
+  const[contactClass,setContactClass]=useState(null);     // "gb"|"ld"|"fb"
+  const[hitResult,setHitResult]=useState(null);           // "out"|"single"|"double"|"triple"|"hr"|"error"
   const[showOutConfirm,setShowOutConfirm]=useState(false);
-  const[hitType,setHitType]=useState(null);
-  const[runnersToResolve,setRunnersToResolve]=useState([]);
-  const[resolvedRunners,setResolvedRunners]=useState([]);
-  const[runnerResolutionIdx,setRunnerResolutionIdx]=useState(0);
+  const[outConfirmType,setOutConfirmType]=useState("out"); // "k"|"walk"|"hbp"|"out"
+  const[runnerScoringIdx,setRunnerScoringIdx]=useState(0);
+  const[runnersToScore,setRunnersToScore]=useState([]);
   const[batterStats,setBatterStats]=useState(null);
   const[batterStatsLoading,setBatterStatsLoading]=useState(false);
+
+  const resetContactFlow=()=>{
+    setContactPending(null);setContactClass(null);setHitResult(null);
+    setRunnersToScore([]);setRunnerScoringIdx(0);
+  };
 
   const currentBatter=lineup?lineup[batterIdx]:null;
   const effectiveBatterHand=currentBatter?(currentBatter.bat==="S"?"R":currentBatter.bat):session.batterHand;
@@ -1093,117 +1121,102 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
     if(isOut||isOnBase) setShowOutConfirm(true);
   };
 
+  const advanceNext=()=>{
+    setBalls(0);setStrikes(0);setSelectedZone(null);setSelectedPitch(null);
+    resetContactFlow();setShowOutConfirm(false);
+    onNewAtBat();
+  };
+
   const handleOutcome=(oc)=>{
     if(!selectedZone) return;
     if(oc.id==="ball"){
-      const nb=balls+1;
-      setBalls(nb);
+      const nb=balls+1;setBalls(nb);
       if(nb>=4){
-        onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Walk",outcomeId:"walk",isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||""});
-        setSelectedZone(null);
-        setSelectedPitch(null);
-        setShowOutConfirm(true);
-      } else { setSelectedZone(null);setSelectedPitch(null); }
+        onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Walk",outcomeId:"walk",
+          isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||"",balls:nb-1,strikes,inning});
+        setSelectedZone(null);setSelectedPitch(null);
+        const cb=session.bases||{first:null,second:null,third:null};
+        onUpdateBases({...cb,first:{name:currentBatter?.name||"Batter",fast:false}});
+        setOutConfirmType("walk");setShowOutConfirm(true);
+      } else {setSelectedZone(null);setSelectedPitch(null);}
       return;
     }
     if(oc.id==="look"||oc.id==="swing"){
-      const ns=strikes+1;
-      setStrikes(ns);
-      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:oc.label,outcomeId:oc.id,isPositive:true,isOut:false,onBase:false,batter:currentBatter?.name||""});
-      setSelectedZone(null);
-      setSelectedPitch(null);
-      if(ns>=3) setShowOutConfirm(true);
+      const ns=strikes+1;setStrikes(ns);
+      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:oc.label,outcomeId:oc.id,
+        isPositive:true,isOut:ns>=3,onBase:false,batter:currentBatter?.name||"",balls,strikes:ns-1,inning});
+      setSelectedZone(null);setSelectedPitch(null);
+      if(ns>=3){onAddOut();setOutConfirmType("k");setShowOutConfirm(true);}
       return;
     }
     if(oc.id==="foul"){
       if(strikes<2) setStrikes(2);
-      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Foul",outcomeId:"foul",isPositive:false,isOut:false,onBase:false,batter:currentBatter?.name||""});
-      setSelectedZone(null);
-      setSelectedPitch(null);
+      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Foul",outcomeId:"foul",
+        isPositive:false,isOut:false,onBase:false,batter:currentBatter?.name||"",balls,strikes,inning});
+      setSelectedZone(null);setSelectedPitch(null);
       return;
     }
     if(oc.id==="hbp"){
-      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"HBP",outcomeId:"hbp",isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||""});
-      setSelectedZone(null);
-      setSelectedPitch(null);
-      setShowOutConfirm(true);
+      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"HBP",outcomeId:"hbp",
+        isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||"",balls,strikes,inning});
+      setSelectedZone(null);setSelectedPitch(null);
+      const cb=session.bases||{first:null,second:null,third:null};
+      onUpdateBases({...cb,first:{name:currentBatter?.name||"Batter",fast:false}});
+      setOutConfirmType("hbp");setShowOutConfirm(true);
       return;
     }
-    // hard / weak -- show secondary
-    if(oc.id==="hard"||oc.id==="weak") { setContactPending(oc); setSelectedZone(s=>s); return; }
+    if(oc.id==="hard"||oc.id==="weak"){setContactPending(oc);return;}
   };
 
-  const startHitFlow=(contactOc,hitTypeId)=>{
-    onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:hitTypeId.charAt(0).toUpperCase()+hitTypeId.slice(1),outcomeId:contactOc.id,isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||"",batterHand:effectiveBatterHand,inning,balls,strikes});
-    setSelectedZone(null);
-    setContactPending(null);
-    const currentBases=session.bases||{first:null,second:null,third:null};
+  const handleHitResult=(result)=>{
+    const cb=session.bases||{first:null,second:null,third:null};
     const occupied=[
-      currentBases.first&&{base:"first",name:currentBases.first.name||"Runner"},
-      currentBases.second&&{base:"second",name:currentBases.second.name||"Runner"},
-      currentBases.third&&{base:"third",name:currentBases.third.name||"Runner"},
+      cb.first&&{base:"first",name:cb.first.name||"Runner"},
+      cb.second&&{base:"second",name:cb.second.name||"Runner"},
+      cb.third&&{base:"third",name:cb.third.name||"Runner"},
     ].filter(Boolean);
-    if(hitTypeId==="hr"){
+    const outcomeLabel=`${contactClass?.toUpperCase()||""} — ${result.charAt(0).toUpperCase()+result.slice(1)}`;
+    const isOut=result==="out";
+    const isError=result==="error";
+    const isHit=!isOut&&!isError;
+    onLogPitch({
+      pitch:selectedPitch,zone:selectedZone,outcome:outcomeLabel,
+      outcomeId:contactPending?.id||"hard",contactClass,hitResult:result,
+      isPositive:isOut,isOut,onBase:isHit||isError,
+      batter:currentBatter?.name||"",balls,strikes,inning,
+    });
+    setSelectedZone(null);setSelectedPitch(null);setHitResult(result);
+    if(isOut){
+      onAddOut();resetContactFlow();setOutConfirmType("out");setShowOutConfirm(true);
+      return;
+    }
+    // Place batter on base
+    const newBases={...cb};
+    if(result==="hr"){
       onUpdateBases({first:null,second:null,third:null});
-      // Auto-advance to next batter
-      setBalls(0);setStrikes(0);setSelectedZone(null);
-      onNewAtBat();
-    } else if(occupied.length===0){
-      const newBases={first:null,second:null,third:null};
-      if(hitTypeId==="single") newBases.first={name:currentBatter?.name||"Batter",fast:false};
-      if(hitTypeId==="double") newBases.second={name:currentBatter?.name||"Batter",fast:false};
-      if(hitTypeId==="triple") newBases.third={name:currentBatter?.name||"Batter",fast:false};
-      onUpdateBases(newBases);
-      // Auto-advance to next batter
-      setBalls(0);setStrikes(0);setSelectedZone(null);
-      onNewAtBat();
+      resetContactFlow();advanceNext();return;
+    }
+    if(result==="single"||result==="error") newBases.first={name:currentBatter?.name||"Batter",fast:false};
+    else if(result==="double") newBases.second={name:currentBatter?.name||"Batter",fast:false};
+    else if(result==="triple") newBases.third={name:currentBatter?.name||"Batter",fast:false};
+    onUpdateBases(newBases);
+    if(occupied.length>0){
+      setRunnersToScore(occupied);setRunnerScoringIdx(0);
     } else {
-      setHitType(hitTypeId);
-      setRunnersToResolve(occupied);
-      setRunnerResolutionIdx(0);
-      setResolvedRunners([]);
+      resetContactFlow();advanceNext();
     }
   };
 
-  const resolveRunner=(newBase)=>{
-    const runner=runnersToResolve[runnerResolutionIdx];
-    const next=[...resolvedRunners,{...runner,newBase}];
-    if(runnerResolutionIdx+1>=runnersToResolve.length){
-      const newBases={first:null,second:null,third:null};
-      next.forEach(r=>{
-        if(r.newBase==="first") newBases.first={name:r.name,fast:false};
-        else if(r.newBase==="second") newBases.second={name:r.name,fast:false};
-        else if(r.newBase==="third") newBases.third={name:r.name,fast:false};
-      });
-      const bn=currentBatter?.name||"Batter";
-      if(hitType==="single"&&!newBases.first) newBases.first={name:bn,fast:false};
-      else if(hitType==="double"&&!newBases.second) newBases.second={name:bn,fast:false};
-      else if(hitType==="triple"&&!newBases.third) newBases.third={name:bn,fast:false};
-      onUpdateBases(newBases);
-      setRunnersToResolve([]);
-      setResolvedRunners([]);
-      setRunnerResolutionIdx(0);
-      setHitType(null);
-      // Auto-advance to next batter
-      setBalls(0);setStrikes(0);setSelectedZone(null);
-      onNewAtBat();
-    } else {
-      setResolvedRunners(next);
-      setRunnerResolutionIdx(i=>i+1);
+  const handleRunnerScored=(scored)=>{
+    if(scored){
+      const cb=session.bases||{first:null,second:null,third:null};
+      const nb={...cb};
+      nb[runnersToScore[runnerScoringIdx].base]=null;
+      onUpdateBases(nb);
     }
-  };
-
-  const handleContactResult=(resultId)=>{
-    if(!contactPending) return;
-    if(resultId==="out"){
-      const label=`${contactPending.label} — Out`;
-      onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:label,outcomeId:contactPending.id,isPositive:true,isOut:true,onBase:false,batter:currentBatter?.name||""});
-      onAddOut();
-      setContactPending(null);
-      setSelectedZone(null);
-      setShowOutConfirm(true);
-    }
-    // "onbase" -> show hit type buttons (handled inline)
+    const nextIdx=runnerScoringIdx+1;
+    if(nextIdx>=runnersToScore.length){resetContactFlow();advanceNext();}
+    else setRunnerScoringIdx(nextIdx);
   };
 
   const [subApiResults,setSubApiResults]=useState([]);
@@ -1236,12 +1249,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
   };
 
   // Runner advancement options based on hit type
-  const advanceOptions=(hitTypeId)=>{
-    if(hitTypeId==="single") return [{id:"first",label:"Stayed (1st)→1st"},{id:"second",label:"Advanced→2nd"},{id:"third",label:"Advanced→3rd"},{id:"scored",label:"Scored"}];
-    if(hitTypeId==="double") return [{id:"second",label:"Stayed→2nd"},{id:"third",label:"Advanced→3rd"},{id:"scored",label:"Scored"}];
-    if(hitTypeId==="triple") return [{id:"third",label:"Stayed→3rd"},{id:"scored",label:"Scored"}];
-    return [];
-  };
+
 
   const [showEndGame,setShowEndGame]=useState(false);
   const outDots=[0,1,2].map(i=>i<outs);
@@ -1404,7 +1412,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       )}
 
       {/* Steal threat notice */}
-      {stealThreat&&!showOutConfirm&&!contactPending&&!hitType&&(
+      {stealThreat&&!showOutConfirm&&!contactPending&&runnersToScore.length===0&&(
         <div style={{background:C.goldLight,border:`1.5px solid ${C.gold}`,borderRadius:8,padding:"7px 12px",marginBottom:10,fontSize:11,fontWeight:700,color:C.gold}}>
           ⚡ Steal threat on base — stretch recommended, fastball frequency boosted
         </div>
@@ -1413,63 +1421,91 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       {/* Strikeout/walk/advance confirm */}
       {showOutConfirm&&(
         <div style={{background:C.white,border:`2px solid ${C.green}`,borderRadius:10,padding:"14px 16px",marginBottom:12,textAlign:"center"}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:10}}>
-            {strikes>=3?"Strikeout ⚾":balls>=4?"Walk 🚶":"At-bat over"}
+          <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>
+            {outConfirmType==="k"?"Strikeout ⚾":outConfirmType==="walk"?"Walk 🚶":outConfirmType==="hbp"?"HBP":outConfirmType==="out"?"Out ✓":"At-bat over"}
           </div>
-          <button onClick={()=>{setShowOutConfirm(false);onNewAtBat();setBalls(0);setStrikes(0);}} style={{...S.primaryBtn,width:"auto",padding:"10px 28px",fontSize:13}}>
+          <div style={{fontSize:11,color:C.textSoft,marginBottom:12,fontWeight:500}}>Advance to next batter?</div>
+          <button onClick={advanceNext} style={{...S.primaryBtn,width:"auto",padding:"10px 28px",fontSize:13}}>
             Next Batter →
           </button>
         </div>
       )}
 
-      {/* Runner resolution flow */}
-      {hitType&&runnersToResolve.length>0&&runnerResolutionIdx<runnersToResolve.length&&(
-        <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
-          <div style={{fontSize:11,fontWeight:800,color:C.textSoft,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.08em"}}>
-            Where is {runnersToResolve[runnerResolutionIdx].name} ({runnersToResolve[runnerResolutionIdx].base})?
+      {/* Runner scoring flow */}
+      {runnersToScore.length>0&&runnerScoringIdx<runnersToScore.length&&(
+        <div style={{background:C.white,border:`2px solid ${C.gold}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:12}}>
+            Did <span style={{color:C.gold}}>{runnersToScore[runnerScoringIdx].name}</span> score?
+            <span style={{fontSize:10,color:C.textSoft,fontWeight:500,marginLeft:6}}>({runnersToScore[runnerScoringIdx].base})</span>
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {advanceOptions(hitType).map(opt=>(
-              <button key={opt.id} onClick={()=>resolveRunner(opt.id)} style={{
-                padding:"11px",borderRadius:8,border:`1.5px solid ${C.border}`,background:C.surface,
-                color:C.text,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif",textAlign:"left",
-              }}>{opt.label}</button>
-            ))}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <button onClick={()=>handleRunnerScored(true)} style={{
+              padding:"12px",borderRadius:9,border:`1.5px solid ${C.green}`,background:C.greenLight,
+              color:C.green,fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+            }}>Yes, scored ✓</button>
+            <button onClick={()=>handleRunnerScored(false)} style={{
+              padding:"12px",borderRadius:9,border:`1.5px solid ${C.border}`,background:C.surface,
+              color:C.textMid,fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+            }}>No, stayed</button>
           </div>
         </div>
       )}
 
-      {/* Contact secondary */}
-      {contactPending&&!showOutConfirm&&!hitType&&(
+      {/* Contact flow: step 1 GB/LD/FB, step 2 result */}
+      {contactPending&&!showOutConfirm&&runnersToScore.length===0&&runnerScoringIdx===0&&(
         <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
-          <div style={{fontSize:11,fontWeight:800,color:C.textSoft,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.08em"}}>
-            {contactPending.label} — result?
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-            <button onClick={()=>handleContactResult("out")} style={{
-              padding:"13px",borderRadius:9,border:`1.5px solid ${C.green}`,background:C.greenLight,
-              color:C.green,fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
-            }}>Out ✓</button>
-            <button onClick={()=>setHitType("__pick")} style={{
-              padding:"13px",borderRadius:9,border:`1.5px solid ${C.warn}`,background:C.warnLight,
-              color:C.warn,fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
-            }}>Hit →</button>
-          </div>
-          {hitType==="__pick"&&(
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-              {[["single","Single"],["double","Double"],["triple","Triple"],["hr","Home Run 🏠"]].map(([id,lbl])=>(
-                <button key={id} onClick={()=>{setHitType(null);startHitFlow(contactPending,id);}} style={{
-                  padding:"10px",borderRadius:8,border:`1.5px solid ${C.border}`,background:C.surface,
-                  color:C.text,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
-                }}>{lbl}</button>
-              ))}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontSize:11,fontWeight:800,color:C.textSoft,textTransform:"uppercase",letterSpacing:"0.08em"}}>
+              {contactPending.label}
             </div>
+            <button onClick={()=>{resetContactFlow();setSelectedZone(null);}} style={{
+              fontSize:10,color:C.textSoft,background:"none",border:`1px solid ${C.border}`,
+              borderRadius:5,padding:"2px 8px",cursor:"pointer",fontFamily:"'Nunito',sans-serif",fontWeight:600,
+            }}>✕ Cancel</button>
+          </div>
+
+          {/* Step 1: contact classification */}
+          {!contactClass&&(
+            <>
+              <div style={{fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:6,textTransform:"uppercase"}}>Contact type</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                {[["gb","Ground Ball"],["ld","Line Drive"],["fb","Fly Ball"]].map(([id,lbl])=>(
+                  <button key={id} onClick={()=>setContactClass(id)} style={{
+                    padding:"11px 6px",borderRadius:8,border:`1.5px solid ${C.border}`,background:C.surface,
+                    color:C.text,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+                  }}>{lbl}</button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Step 2: result */}
+          {contactClass&&(
+            <>
+              <div style={{fontSize:10,fontWeight:700,color:C.textSoft,marginBottom:6,textTransform:"uppercase"}}>
+                {contactClass==="gb"?"Ground Ball":contactClass==="ld"?"Line Drive":"Fly Ball"} — result
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
+                {[["out","Out ✓"],["single","Single"],["double","Double"],["triple","Triple"],["hr","HR 🏠"],["error","Error"]].map(([id,lbl])=>(
+                  <button key={id} onClick={()=>handleHitResult(id)} style={{
+                    padding:"10px 4px",borderRadius:8,fontFamily:"'Nunito',sans-serif",fontSize:11,fontWeight:800,cursor:"pointer",
+                    border:`1.5px solid ${id==="out"?C.green:id==="error"?C.gold:C.warn}`,
+                    background:id==="out"?C.greenLight:id==="error"?C.goldLight:C.warnLight,
+                    color:id==="out"?C.green:id==="error"?C.gold:C.warn,
+                  }}>{lbl}</button>
+                ))}
+              </div>
+              <button onClick={()=>setContactClass(null)} style={{
+                fontSize:10,color:C.textSoft,background:"none",border:"none",cursor:"pointer",
+                fontFamily:"'Nunito',sans-serif",fontWeight:600,padding:0,
+              }}>← Back to contact type</button>
+            </>
           )}
         </div>
       )}
 
       {/* Recommendation box -- driven by activePitch */}
-      {activePitch&&!showOutConfirm&&!contactPending&&(
+      {activePitch&&!showOutConfirm&&!contactPending&&runnersToScore.length===0&&(
         <div style={S.recBox}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
@@ -1486,7 +1522,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
         </div>
       )}
 
-      {!showOutConfirm&&!contactPending&&(<>
+      {!showOutConfirm&&!contactPending&&runnersToScore.length===0&&(<>
         {/* Pitch selector */}
         <div style={{marginBottom:12}}>
           <div style={S.sectionLabel}>Select Pitch</div>
@@ -1745,67 +1781,246 @@ function LoginScreen({onLogin}){
   );
 }
 
+function StatsTab({user}){
+  const [allLog,setAllLog]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [view,setView]=useState("pitcher");
+  const [selected,setSelected]=useState(null);
+  useEffect(()=>{loadAllPitchLog(user).then(d=>{setAllLog(d);setLoading(false);});},[user]);
+  if(loading) return <div style={S.emptyState}>Loading stats...</div>;
+  if(allLog.length===0) return <div style={S.emptyState}>No data yet. Play and save some games first.</div>;
+  const pct=(n,d)=>d>0?Math.round((n/d)*100):0;
+
+  const pitcherStats=useMemo(()=>{
+    const map={};
+    allLog.forEach(p=>{
+      const k=p.pitcher_name||"Unknown";
+      if(!map[k]) map[k]={name:k,pitches:0,outs:0,hits:0,walks:0,ks:0,counts:{}};
+      map[k].pitches++;
+      if(p.is_out) map[k].outs++;
+      if(p.on_base) map[k].hits++;
+      if(p.outcome_id==="walk") map[k].walks++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].ks++;
+      map[k].counts[p.pitch_type]=(map[k].counts[p.pitch_type]||0)+1;
+    });
+    return Object.values(map).sort((a,b)=>b.pitches-a.pitches);
+  },[allLog]);
+
+  const batterStats=useMemo(()=>{
+    const map={};
+    allLog.forEach(p=>{
+      const k=p.batter_name||"";if(!k.trim()) return;
+      if(!map[k]) map[k]={name:k,pas:0,outs:0,hits:0,pr:{}};
+      map[k].pas++;
+      if(p.is_out) map[k].outs++;
+      if(p.on_base) map[k].hits++;
+      if(!map[k].pr[p.pitch_type]) map[k].pr[p.pitch_type]={outs:0,hits:0,total:0};
+      map[k].pr[p.pitch_type].total++;
+      if(p.is_out) map[k].pr[p.pitch_type].outs++;
+      if(p.on_base) map[k].pr[p.pitch_type].hits++;
+    });
+    return Object.values(map).sort((a,b)=>b.pas-a.pas);
+  },[allLog]);
+
+  const countStats=useMemo(()=>{
+    const map={};
+    allLog.forEach(p=>{
+      const k=`${p.balls||0}-${p.strikes||0}`;
+      if(!map[k]) map[k]={count:k,total:0,outs:0,hits:0,ks:0};
+      map[k].total++;
+      if(p.is_out) map[k].outs++;
+      if(p.on_base) map[k].hits++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].ks++;
+    });
+    const order=["0-0","0-1","0-2","1-0","1-1","1-2","2-0","2-1","2-2","3-0","3-1","3-2"];
+    return order.filter(k=>map[k]).map(k=>map[k]);
+  },[allLog]);
+
+  const zoneStats=useMemo(()=>{
+    const map={};
+    allLog.forEach(p=>{
+      if(!p.zone) return;
+      if(!map[p.zone]) map[p.zone]={total:0,outs:0,hits:0};
+      map[p.zone].total++;
+      if(p.is_out) map[p.zone].outs++;
+      if(p.on_base) map[p.zone].hits++;
+    });
+    return map;
+  },[allLog]);
+
+  const VIEWS=[{id:"pitcher",label:"Pitcher"},{id:"batter",label:"Batters"},{id:"count",label:"Counts"},{id:"zone",label:"Zones"}];
+
+  return(
+    <div style={{padding:"0"}}>
+      <div style={{display:"flex",borderBottom:`1.5px solid ${C.border}`,background:C.white}}>
+        {VIEWS.map(v=>(
+          <button key={v.id} onClick={()=>{setView(v.id);setSelected(null);}} style={{
+            flex:1,padding:"10px 4px",fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+            background:"none",border:"none",borderBottom:`2px solid ${view===v.id?C.greenMid:"transparent"}`,
+            color:view===v.id?C.green:C.textSoft,cursor:"pointer",
+          }}>{v.label}</button>
+        ))}
+      </div>
+      <div style={{padding:"16px"}}>
+
+        {view==="pitcher"&&!selected&&(<>
+          <div style={S.sectionLabel}>Pitcher Stats ({pitcherStats.length})</div>
+          {pitcherStats.map(p=>(
+            <div key={p.name} onClick={()=>setSelected(p)} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.text}}>{p.name}</div>
+                <div style={{fontSize:11,color:C.textSoft}}>{p.pitches} pitches</div>
+              </div>
+              <div style={{display:"flex",gap:12}}>
+                {[["K%",pct(p.ks,p.pitches)],["BB%",pct(p.walks,p.pitches)],["OBP",pct(p.hits,p.pitches)],["Out%",pct(p.outs,p.pitches)]].map(([lbl,val])=>(
+                  <div key={lbl} style={{textAlign:"center"}}>
+                    <div style={{fontSize:14,fontWeight:800,color:C.green}}>{val}%</div>
+                    <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>)}
+
+        {view==="pitcher"&&selected&&(<>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <button onClick={()=>setSelected(null)} style={{...S.ghostBtn,padding:"4px 10px"}}>← Back</button>
+            <div style={{fontSize:14,fontWeight:800,color:C.text}}>{selected.name}</div>
+          </div>
+          <div style={{display:"flex",gap:10,marginBottom:16}}>
+            {[["K%",pct(selected.ks,selected.pitches)],["BB%",pct(selected.walks,selected.pitches)],["OBP",pct(selected.hits,selected.pitches)],["Out%",pct(selected.outs,selected.pitches)]].map(([lbl,val])=>(
+              <div key={lbl} style={{flex:1,background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"10px",textAlign:"center"}}>
+                <div style={{fontSize:18,fontWeight:800,color:C.green}}>{val}%</div>
+                <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+              </div>
+            ))}
+          </div>
+          <div style={S.sectionLabel}>Pitch Usage</div>
+          <div style={S.card}>
+            {Object.entries(selected.counts).sort((a,b)=>b[1]-a[1]).map(([type,count])=>(
+              <div key={type} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+                <span style={{flex:1,fontSize:12,fontWeight:700,color:C.text}}>{type}</span>
+                <span style={{fontSize:10,color:C.textSoft,width:28,textAlign:"right"}}>{count}x</span>
+                <div style={{width:50,height:5,background:C.surface,borderRadius:3,overflow:"hidden"}}>
+                  <div style={{width:`${pct(count,selected.pitches)}%`,height:"100%",background:C.green,borderRadius:3}}/>
+                </div>
+                <span style={{fontSize:11,fontWeight:700,color:C.textMid,width:32,textAlign:"right"}}>{pct(count,selected.pitches)}%</span>
+              </div>
+            ))}
+          </div>
+        </>)}
+
+        {view==="batter"&&!selected&&(<>
+          <div style={S.sectionLabel}>Batter Tendencies ({batterStats.length})</div>
+          {batterStats.map(b=>(
+            <div key={b.name} onClick={()=>setSelected(b)} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.text}}>{b.name}</div>
+                <div style={{fontSize:11,color:C.textSoft}}>{b.pas} PA</div>
+              </div>
+              <div style={{display:"flex",gap:12}}>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:14,fontWeight:800,color:b.hits/b.pas>0.35?C.warn:C.green}}>{pct(b.hits,b.pas)}%</div>
+                  <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>OBP</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:14,fontWeight:800,color:C.green}}>{pct(b.outs,b.pas)}%</div>
+                  <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>Out%</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </>)}
+
+        {view==="batter"&&selected&&(<>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <button onClick={()=>setSelected(null)} style={{...S.ghostBtn,padding:"4px 10px"}}>← Back</button>
+            <div style={{fontSize:14,fontWeight:800,color:C.text}}>{selected.name}</div>
+          </div>
+          <div style={S.sectionLabel}>Pitch Results</div>
+          <div style={S.card}>
+            {Object.entries(selected.pr).sort((a,b)=>b[1].total-a[1].total).map(([type,res])=>(
+              <div key={type} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+                <span style={{flex:1,fontSize:12,fontWeight:700,color:C.text}}>{type}</span>
+                <span style={{fontSize:10,color:C.textSoft,width:24,textAlign:"right"}}>{res.total}x</span>
+                <span style={{fontSize:10,fontWeight:700,color:C.green,width:48,textAlign:"right"}}>{pct(res.outs,res.total)}% out</span>
+                <span style={{fontSize:10,fontWeight:700,color:C.warn,width:44,textAlign:"right"}}>{pct(res.hits,res.total)}% hit</span>
+              </div>
+            ))}
+          </div>
+        </>)}
+
+        {view==="count"&&(<>
+          <div style={S.sectionLabel}>By Count</div>
+          <div style={S.card}>
+            <div style={{display:"grid",gridTemplateColumns:"40px 1fr 1fr 1fr 1fr",gap:4,marginBottom:6}}>
+              {["Count","Pitches","Out%","K%","OBP"].map(h=>(
+                <span key={h} style={{fontSize:9,color:C.textSoft,fontWeight:700,textAlign:"right",textTransform:"uppercase"}}>{h}</span>
+              ))}
+            </div>
+            {countStats.map(c=>(
+              <div key={c.count} style={{display:"grid",gridTemplateColumns:"40px 1fr 1fr 1fr 1fr",gap:4,padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
+                <span style={{fontSize:13,fontWeight:800,color:C.text}}>{c.count}</span>
+                <span style={{fontSize:11,color:C.textSoft,textAlign:"right"}}>{c.total}</span>
+                <span style={{fontSize:11,fontWeight:700,color:C.green,textAlign:"right"}}>{pct(c.outs,c.total)}%</span>
+                <span style={{fontSize:11,fontWeight:700,color:C.green,textAlign:"right"}}>{pct(c.ks,c.total)}%</span>
+                <span style={{fontSize:11,fontWeight:700,color:c.hits/c.total>0.35?C.warn:C.textMid,textAlign:"right"}}>{pct(c.hits,c.total)}%</span>
+              </div>
+            ))}
+          </div>
+        </>)}
+
+        {view==="zone"&&(<>
+          <div style={S.sectionLabel}>Zone Effectiveness (darker = more outs)</div>
+          <div style={S.card}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3}}>
+              {Array.from({length:25},(_,idx)=>{
+                const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
+                const z=zoneStats[id],inZ=row>=1&&row<=3&&col>=1&&col<=3;
+                const outPct=z?pct(z.outs,z.total):0;
+                const intensity=outPct/100;
+                return(<div key={id} style={{height:46,borderRadius:5,
+                  background:z?`rgba(45,106,79,${0.1+intensity*0.85})`:inZ?C.white:C.surface,
+                  border:`1.5px solid ${C.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                  {z&&<>
+                    <span style={{color:intensity>0.5?"#fff":C.green,fontSize:11,fontWeight:800}}>{outPct}%</span>
+                    <span style={{color:intensity>0.5?"rgba(255,255,255,0.7)":C.textSoft,fontSize:8}}>{z.total}p</span>
+                  </>}
+                </div>);
+              })}
+            </div>
+          </div>
+        </>)}
+
+      </div>
+    </div>
+  );
+}
+
 function HistoryTab({user}){
   const [games,setGames]=useState([]);
   const [loading,setLoading]=useState(true);
   const [selected,setSelected]=useState(null);
-  const [statsView,setStatsView]=useState(null);
-  const [statsData,setStatsData]=useState([]);
-  const [statsLoading,setStatsLoading]=useState(false);
-  useEffect(()=>{loadGames(user,30).then(g=>{setGames(g);setLoading(false);});},[user]);
-  const doLoadStats=async(type,name)=>{
-    setStatsLoading(true);setStatsView({type,name});
-    const d=type==="pitcher"?await loadPitcherStats(name,user):await loadBatterTendencies(name,user);
-    setStatsData(d);setStatsLoading(false);
+  const [deleting,setDeleting]=useState(null);
+  const [clearConfirm,setClearConfirm]=useState(false);
+  const [clearing,setClearing]=useState(false);
+
+  const reload=()=>{setLoading(true);loadGames(user,50).then(g=>{setGames(g);setLoading(false);});};
+  useEffect(()=>{reload();},[user]);
+
+  const handleDelete=async(gameId)=>{
+    setDeleting(gameId);
+    await deleteGame(gameId);
+    setDeleting(null);setSelected(null);reload();
   };
-  if(statsView){
-    const pc={},zc={},op={};
-    statsData.forEach(p=>{
-      pc[p.pitch_type]=(pc[p.pitch_type]||0)+1;
-      if(p.zone) zc[p.zone]=(zc[p.zone]||0)+1;
-      if(!op[p.pitch_type]) op[p.pitch_type]={outs:0,total:0};
-      op[p.pitch_type].total++;if(p.is_out) op[p.pitch_type].outs++;
-    });
-    const sp=Object.entries(pc).sort((a,b)=>b[1]-a[1]);
-    const mz=Math.max(1,...Object.values(zc));
-    return(<div style={{padding:"16px"}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
-        <button onClick={()=>{setStatsView(null);setStatsData([]);}} style={{...S.ghostBtn,padding:"4px 10px"}}>← Back</button>
-        <div><div style={S.sectionLabel}>{statsView.type==="pitcher"?"Pitcher Stats":"Batter Tendencies"}</div>
-          <div style={{fontSize:14,fontWeight:800,color:C.text}}>{statsView.name}</div></div>
-      </div>
-      {statsLoading?<div style={S.emptyState}>Loading...</div>:statsData.length===0?<div style={S.emptyState}>No data.</div>:(<>
-        <div style={S.sectionLabel}>Pitch Usage ({statsData.length})</div>
-        <div style={{...S.card,marginBottom:16}}>
-          {sp.map(([type,count])=>{
-            const o=op[type]||{};const pct=o.total>0?Math.round((o.outs/o.total)*100):0;
-            return(<div key={type} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
-              <span style={{flex:1,fontSize:13,fontWeight:700,color:C.text}}>{type}</span>
-              <span style={{fontSize:11,color:C.textSoft,width:36,textAlign:"right"}}>{count}x</span>
-              <div style={{width:50,height:5,background:C.surface,borderRadius:3,overflow:"hidden"}}>
-                <div style={{width:`${Math.round((count/statsData.length)*100)}%`,height:"100%",background:C.green,borderRadius:3}}/>
-              </div>
-              <span style={{fontSize:11,fontWeight:700,color:pct>40?C.green:C.textSoft,width:50,textAlign:"right"}}>{pct}% out</span>
-            </div>);
-          })}
-        </div>
-        <div style={S.sectionLabel}>Zone Heatmap</div>
-        <div style={S.card}>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3}}>
-            {Array.from({length:25},(_,idx)=>{
-              const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
-              const cnt=zc[id]||0,intens=cnt/mz,inZ=row>=1&&row<=3&&col>=1&&col<=3;
-              return(<div key={id} style={{height:40,borderRadius:5,
-                background:cnt>0?`rgba(45,106,79,${0.12+intens*0.75})`:inZ?C.white:C.surface,
-                border:`1.5px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                {cnt>0&&<span style={{color:intens>0.5?"#fff":C.green,fontSize:11,fontWeight:700}}>{cnt}</span>}
-              </div>);
-            })}
-          </div>
-        </div>
-      </>)}
-    </div>);
-  }
+
+  const handleClearAll=async()=>{
+    setClearing(true);
+    await deleteAllGames(user);
+    setClearing(false);setClearConfirm(false);setGames([]);
+  };
+
   if(selected){
     const g=games.find(x=>x.id===selected);if(!g) return null;
     const log=g.game_log||[];
@@ -1815,7 +2030,9 @@ function HistoryTab({user}){
         <div><div style={{fontSize:14,fontWeight:800,color:C.text}}>{g.pitcher_name}</div>
           <div style={{fontSize:11,color:C.textSoft}}>{new Date(g.created_at).toLocaleDateString()} · {g.my_score}–{g.opp_score} · {g.total_pitches}p</div></div>
       </div>
-      <button onClick={()=>doLoadStats("pitcher",g.pitcher_name)} style={{...S.ghostBtn,marginBottom:12}}>Career Stats</button>
+      <button onClick={()=>handleDelete(g.id)} disabled={deleting===g.id} style={{...S.ghostBtn,color:C.warn,borderColor:C.warn,marginBottom:12,opacity:deleting===g.id?0.5:1}}>
+        {deleting===g.id?"Deleting...":"🗑 Delete Game"}
+      </button>
       <div style={S.sectionLabel}>Pitch Log</div>
       {log.length===0?<div style={S.emptyState}>No pitches.</div>:(
         [...log].reverse().map((e,i)=>{
@@ -1826,19 +2043,29 @@ function HistoryTab({user}){
             <span style={{flex:1,fontSize:12,fontWeight:700,color:C.text}}>{e.pitch}</span>
             {e.batter&&<span style={{fontSize:10,color:C.textSoft}}>{e.batter.split(" ").pop()}</span>}
             <span style={{fontSize:10,color:C.textSoft,marginRight:4}}>{e.zone||"--"}</span>
-            <span style={{fontSize:10,fontWeight:700,color:dot,textAlign:"right",maxWidth:110}}>{e.outcome}</span>
+            <span style={{fontSize:10,fontWeight:700,color:dot,textAlign:"right",maxWidth:120}}>{e.outcome}</span>
           </div>);
         })
       )}
     </div>);
   }
+
   return(<div style={{padding:"16px"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
       <div style={S.sectionLabel}>Game History</div>
-      <span style={{fontSize:11,color:C.textSoft,fontWeight:700}}>{games.length} games</span>
+      <button onClick={()=>setClearConfirm(true)} style={{...S.ghostBtn,color:C.warn,borderColor:C.warn,fontSize:10,padding:"3px 8px"}}>Clear All</button>
     </div>
+    {clearConfirm&&(
+      <div style={{background:C.warnLight,border:`1.5px solid ${C.warn}`,borderRadius:8,padding:"12px",marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.warn,marginBottom:8}}>Delete all {games.length} games? Cannot be undone.</div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={handleClearAll} disabled={clearing} style={{...S.ghostBtn,color:C.warn,borderColor:C.warn,opacity:clearing?0.5:1}}>{clearing?"Clearing...":"Yes, delete all"}</button>
+          <button onClick={()=>setClearConfirm(false)} style={S.ghostBtn}>Cancel</button>
+        </div>
+      </div>
+    )}
     {loading?<div style={S.emptyState}>Loading...</div>:games.length===0?
-      <div style={S.emptyState}>No games saved yet. Finish a game and tap "Save Game" in the Log tab.</div>:
+      <div style={S.emptyState}>No games saved yet.</div>:
       games.map(g=>(<div key={g.id} onClick={()=>setSelected(g.id)} style={{background:C.white,
         border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -1853,6 +2080,7 @@ function HistoryTab({user}){
     }
   </div>);
 }
+
 
 function App(){
   const [tab,setTab]=useState("setup");
@@ -1932,7 +2160,7 @@ function App(){
   },[session,user]);
 
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
-  const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"},{id:"history",label:"History"}];
+  const TABS=[{id:"setup",label:"Setup"},{id:"atbat",label:"At-Bat"},{id:"visuals",label:"Visuals"},{id:"log",label:"Log"},{id:"stats",label:"Stats"},{id:"history",label:"History"}];
 
   if(!user) return <LoginScreen onLogin={setUser}/>;
 
@@ -2016,6 +2244,7 @@ function App(){
           </div>
           :<div style={S.emptyState}>Complete setup first.</div>
         )}
+        {tab==="stats"&&<StatsTab user={user}/>}
         {tab==="history"&&<HistoryTab user={user}/>}
       </div>
     </div>
