@@ -816,8 +816,16 @@ function SetupTab({onComplete}){
 
   const results=proxyReady?(apiResults.length>0?apiResults:localResults):localResults;
 
+  // batterIdx must be a hook -- declare before early return
+  const [batterIdx,setBatterIdx]=useState(0);
+
   // Show game type screen after all hooks
   if(!gameType) return <GameTypeScreen onSelect={setGameType}/>;
+
+  const currentBatter=lineup?lineup[batterIdx]:null;
+  const effectiveBatterHand=currentBatter
+    ? (currentBatter.bat==="S"?"R":currentBatter.bat)
+    : batterHand;
 
   const selectPitcher=(p)=>{
     setSelectedName(p.name);setPitcherHand(p.hand||"R");
@@ -840,14 +848,6 @@ function SetupTab({onComplete}){
   };
 
   const canStart=pitches.length>=2;
-
-  // Determine current batter from lineup
-  const [batterIdx,setBatterIdx]=useState(0);
-  const currentBatter=lineup?lineup[batterIdx]:null;
-  const effectiveBatterHand=currentBatter
-    ? (currentBatter.bat==="S"?"R":currentBatter.bat)
-    : batterHand;
-
   return(
     <div style={{padding:"0"}}>
       {/* Sub-tabs */}
