@@ -494,10 +494,6 @@ const ZONE_REC = {
   "Splitter":  {R:"4-2",L:"4-2"},
   "Knuckleball":{R:"2-2",L:"2-2"},
 };
-  "Changeup":  {R:"3-1",L:"3-3"},
-  "Splitter":  {R:"4-2",L:"4-2"},
-  "Knuckleball":{R:"2-2",L:"2-2"},
-};
 const ZONE_CHASE={
   "4-Seam FB": {R:"0-3",L:"0-1"},
   "2-Seam FB": {R:"4-4",L:"4-0"},
@@ -731,8 +727,11 @@ function LineupSetup({onSave,initialLineup}){
         <div style={S.sectionLabel}>Opposing Lineup</div>
         <button onClick={autoGenLineup} disabled={autoFilling} style={{...S.ghostBtn,opacity:autoFilling?0.5:1}}>{autoFilling?"Filling...":"🎲 Auto-Fill"}</button>
       </div>
-      <div style={{fontSize:11,color:C.textSoft,marginBottom:12,fontWeight:600}}>
+      <div style={{fontSize:11,color:C.textSoft,marginBottom:4,fontWeight:600}}>
         Search DD card names to build your lineup
+      </div>
+      <div style={{fontSize:10,color:C.gold,marginBottom:12,fontWeight:600,background:C.goldLight,borderRadius:6,padding:"5px 8px"}}>
+        ⚠ Auto-fill may not correctly set batter handedness — verify each slot after filling
       </div>
       {lineup.map((slot,i)=>(
         <div key={i} style={{
