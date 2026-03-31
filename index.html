@@ -1213,34 +1213,30 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
     if(!selectedZone) return;
     if(oc.id==="ball"){
       const nb=balls+1;setBalls(nb);
-      if(nb>=4){
-        onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Walk",outcomeId:"walk",
-          isPositive:false,isOut:false,onBase:true,batter:currentBatter?.name||"",balls:nb-1,strikes,inning});
-        setSelectedZone(null);setSelectedPitch(null);
-        // Force advancement: cascade bases if occupied
+      // Log every ball -- not just the walk
+      const isWalk=nb>=4;
+      onLogPitch({pitch:selectedPitch,zone:selectedZone,
+        outcome:isWalk?"Walk":`Ball ${nb}`,outcomeId:"ball",
+        isPositive:false,isOut:false,onBase:isWalk,
+        batter:currentBatter?.name||"",balls:nb-1,strikes,inning});
+      setSelectedZone(null);setSelectedPitch(null);
+      if(isWalk){
+        // Force advancement cascade
         const cb=session.bases||{first:null,second:null,third:null};
         const nb2={...cb};
         const batterName=currentBatter?.name||"Batter";
         if(cb.first&&cb.second&&cb.third){
-          // Bases loaded -- everyone advances, run scores
-          nb2.first={name:batterName,fast:false};
-          // second and third stay, third runner scores (implicit)
-          nb2.third=nb2.second;nb2.second=nb2.first;nb2.first={name:batterName,fast:false};
-          // Actually: third scores, second->third, first->second, batter->first
           nb2.third=cb.second;nb2.second=cb.first;nb2.first={name:batterName,fast:false};
         } else if(cb.first&&cb.second){
-          // First and second: second->third, first->second, batter->first
           nb2.third=cb.second;nb2.second=cb.first;nb2.first={name:batterName,fast:false};
         } else if(cb.first){
-          // First occupied: first->second, batter->first
           nb2.second=cb.first;nb2.first={name:batterName,fast:false};
         } else {
-          // First empty: batter->first
           nb2.first={name:batterName,fast:false};
         }
         onUpdateBases(nb2);
         setOutConfirmType("walk");setShowOutConfirm(true);
-      } else {setSelectedZone(null);setSelectedPitch(null);}
+      }
       return;
     }
     if(oc.id==="look"||oc.id==="swing"){
