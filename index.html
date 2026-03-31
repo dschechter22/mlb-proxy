@@ -746,7 +746,7 @@ const PITCH_TYPES_LIST=PITCH_TYPES;
 function GameTypeScreen({onSelect}) {
   const TYPES = [
     {id:"ranked", label:"Ranked", sub:"9 innings", color:"#c0392b", hover:"#e74c3c"},
-    {id:"br", label:"Battle Royale", sub:"9 innings", color:"#1a5fa8", hover:"#2980b9"},
+    {id:"br", label:"Battle Royale", sub:"3 innings", color:"#1a5fa8", hover:"#2980b9"},
     {id:"event", label:"Event", sub:"6 innings", color:"#6c3483", hover:"#8e44ad"},
   ];
   return(
@@ -792,9 +792,7 @@ function SetupTab({onComplete}){
   const [apiError,setApiError]=useState("");
   const proxyReady = true;
 
-  // Show game type screen first
-  if(!gameType) return <GameTypeScreen onSelect={setGameType}/>;
-
+  // All hooks must run before any early return
   const localResults=useMemo(()=>{
     if(query.length<2) return [];
     const q=query.toLowerCase();
@@ -804,25 +802,22 @@ function SetupTab({onComplete}){
   useEffect(()=>{
     if(query.length<2||selectedName){setApiResults([]);setApiError("");return;}
     const t=setTimeout(async()=>{
-      setApiLoading(true);
-      setApiError("");
+      setApiLoading(true);setApiError("");
       try{
-        console.log("Searching API for:", query);
         const res=await searchPitchers(query);
-        console.log("API returned:", res.length, "pitchers", res);
         setApiResults(res.slice(0,8));
         if(res.length===0) setApiError("No DD pitchers found");
       }catch(e){
-        console.error("API search error:", e);
-        setApiError(e.message);
-        setApiResults([]);
-      }
-      finally{setApiLoading(false);}
+        setApiError(e.message);setApiResults([]);
+      }finally{setApiLoading(false);}
     },400);
     return()=>clearTimeout(t);
   },[query,selectedName]);
 
   const results=proxyReady?(apiResults.length>0?apiResults:localResults):localResults;
+
+  // Show game type screen after all hooks
+  if(!gameType) return <GameTypeScreen onSelect={setGameType}/>;
 
   const selectPitcher=(p)=>{
     setSelectedName(p.name);setPitcherHand(p.hand||"R");
@@ -1835,7 +1830,6 @@ const S={
 };
 
 
-// ─── Login Screen ─────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}){
   const [username,setUsername]=useState("");
   const [pin,setPin]=useState("");
@@ -1883,7 +1877,6 @@ function LoginScreen({onLogin}){
   );
 }
 
-// ─── History Tab ──────────────────────────────────────────────────────────────
 function HistoryTab({user}){
   const [games,setGames]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -1993,7 +1986,6 @@ function HistoryTab({user}){
   </div>);
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
 function App(){
   const [tab,setTab]=useState("setup");
   const [session,setSession]=useState(null);
@@ -2008,7 +2000,6 @@ function App(){
       outs:0,inning:1,myScore:0,oppScore:0,inningLog:[],bases:{first:null,second:null,third:null}});
     setTab("atbat");setSavedId(null);
   },[]);
-
   const handleLogPitch=useCallback((entry)=>{
     setSession(prev=>{
       const no={...prev.outcomes};
@@ -2017,7 +2008,6 @@ function App(){
       return{...prev,sequence:[...prev.sequence,entry],gameLog:[...prev.gameLog,entry],outcomes:no};
     });
   },[]);
-
   const handleAddOut=useCallback(()=>{
     setSession(prev=>{
       const n=prev.outs+1;
@@ -2026,38 +2016,29 @@ function App(){
       return{...prev,outs:n};
     });
   },[]);
-
   const handleScoreSubmit=useCallback(()=>{
     setSession(prev=>({...prev,myScore:prev.myScore+scoreInput.my,oppScore:prev.oppScore+scoreInput.opp,
       inningLog:[...prev.inningLog,{inning:prev.inning-1,my:scoreInput.my,opp:scoreInput.opp}]}));
     setShowScorePrompt(false);
   },[scoreInput]);
-
   const handleNewAtBat=useCallback(()=>{
     setSession(prev=>{
       const v=prev.lineup?prev.lineup.filter(b=>b.name):[];
       return{...prev,sequence:[],batterIdx:v.length>0?(prev.batterIdx+1)%v.length:0};
     });
   },[]);
-
   const handleSub=useCallback((slot,nb)=>setSession(prev=>{
     if(!prev.lineup) return prev;
     const nl=[...prev.lineup];nl[slot]={name:nb.name,bat:nb.bat,custom:false};return{...prev,lineup:nl};
   }),[]);
-
   const handleUpdateBases=useCallback((b)=>setSession(prev=>({...prev,bases:b})),[]);
-
   const handleSaveGame=useCallback(async()=>{
     if(!session||saving) return;
     setSaving(true);const id=await saveGame(session,user);setSaving(false);if(id) setSavedId(id);
   },[session,saving,user]);
-
   const handleLogout=useCallback(()=>{clearStoredUser();setUser(null);},[]);
-
   const handleEndGame=useCallback(async(action)=>{
-    if(action==="save"&&session){
-      await saveGame(session,user);
-    }
+    if(action==="save"&&session) await saveGame(session,user);
     setSession(null);setTab("setup");setSavedId(null);
   },[session,user]);
 
