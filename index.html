@@ -1054,27 +1054,53 @@ function zoneLabel(id){
 }
 
 // ─── Tunnel + location reason ─────────────────────────────────────────────────
+function getZoneReason(pitchType, recZone){
+  if(!recZone) return "";
+  const[r,c]=recZone.split("-").map(Number);
+  const inZone=r>=1&&r<=3&&c>=1&&c<=3;
+  const isHigh=r<=1, isLow=r>=3, isAway=c>=3, isInside=c<=1, isChase=!inZone;
+  const prof=PITCH_PROFILES[pitchType];
+  const isBreaking=prof?.type==="breaking";
+  const isOffspeed=prof?.type==="offspeed";
+  const isFB=prof?.type==="fastball";
+
+  if(isChase&&isLow&&isBreaking) return "Chase zone — breaking ball below strike zone forces check swing or roll-over weak contact.";
+  if(isChase&&isLow&&isOffspeed) return "Chase zone — changeup diving below zone generates swing-and-miss or weak grounder.";
+  if(isChase&&isHigh&&isFB) return "High heat — fastball above zone catches barrel-hunting hitters with rising action, pop-ups and swings-and-misses.";
+  if(isChase&&isAway&&isBreaking) return "Back-foot breaking ball — sweeping away from the zone, hitters chase and roll over for weak contact.";
+  if(isChase&&isAway&&isOffspeed) return "Fade away — off-speed diving outside the zone, hitters lunge and miss or hit it off the end.";
+  if(isAway&&isLow&&isBreaking) return "Low and away — breaking ball finishing at the corner. Hitters can't cover down-and-away, generates weak contact and miss.";
+  if(isAway&&isLow&&isOffspeed) return "Low and away — changeup fading to the corner freezes the hitter's weight, soft contact or miss.";
+  if(isAway&&inZone&&isFB) return "Away corner — keeps the barrel away from the sweet spot, generates opposite-field weak contact.";
+  if(isInside&&isLow&&isFB) return "Low and in — running fastball jams the hitter's hands, produces roll-over grounders or broken bats.";
+  if(isHigh&&inZone&&isFB) return "Up in the zone — rising fastball above the barrel path, generates swing-and-misses and pop-ups.";
+  if(isInside&&inZone&&isBreaking) return "Backdoor — breaking ball cutting back over the inside corner freezes right-handed hitters for called strikes.";
+  if(isLow&&inZone&&isBreaking) return "Low in the zone — late downward break makes hitters beat it into the ground, weak contact or miss.";
+  if(isLow&&inZone&&isOffspeed) return "Low and soft — change of speed low in the zone disrupts timing, weak contact or swing-and-miss.";
+  return "";
+}
+
 function getFullReason(lastPitch,lastZone,recPitch,recZone,score){
   const lp=PITCH_PROFILES[lastPitch],rp=PITCH_PROFILES[recPitch];
-  if(!lp||!rp) return "Good sequencing option";
+  // Build zone location reasoning first
+  const zoneReason=getZoneReason(recPitch,recZone);
   const zoneTxt=recZone?` — target ${zoneLabel(recZone)}`:"";
-  // Check if zones are on same horizontal band (same row ±1)
-  let zoneContext="";
-  if(lastZone&&recZone){
-    const[lr,lc]=lastZone.split("-").map(Number);
-    const[rr,rc]=recZone.split("-").map(Number);
-    const sameRow=Math.abs(lr-rr)<=1;
-    const sameCol=Math.abs(lc-rc)<=1;
-    if(sameRow&&sameCol) zoneContext=" Same quadrant reinforces tunnel — hitter sees identical release.";
-    else if(sameRow) zoneContext=" Same vertical band — tunnel holds, breaks to a different side.";
-    else zoneContext=" Different vertical band — tunnel relies on release point match, not location.";
+
+  // Sequence reasoning
+  let seqReason="";
+  if(lp&&rp){
+    if(score>=70) seqReason=`Strong tunnel off ${lastPitch}.`;
+    else if(lp.type===rp.type) seqReason=`Same pitch family — consider mixing shapes.`;
+    else if(rp.type==="offspeed"&&lp.type==="fastball") seqReason=`Velocity change off ${lastPitch}.`;
+    else if(rp.type==="breaking"&&lp.type==="fastball") seqReason=`Breaking ball off fastball tunnel.`;
+    else if(rp.type==="fastball"&&lp.type!=="fastball") seqReason=`Reset hitter's eye with heater.`;
+    else seqReason=`Shape contrast to ${lastPitch}.`;
+  } else if(rp) {
+    seqReason=`Opening pitch${zoneTxt}.`;
   }
-  if(score>=70) return `Strong tunnel off ${lastPitch}${zoneTxt}.${zoneContext}`;
-  if(lp.type===rp.type) return `Same pitch family — mix a different shape${zoneTxt}.${zoneContext}`;
-  if(rp.type==="offspeed"&&lp.type==="fastball") return `Velocity change off ${lastPitch}${zoneTxt}.${zoneContext}`;
-  if(rp.type==="breaking"&&lp.type==="fastball") return `Breaking ball off fastball tunnel${zoneTxt}.${zoneContext}`;
-  if(rp.type==="fastball"&&lp.type!=="fastball") return `Reset hitter's eye with heater${zoneTxt}.${zoneContext}`;
-  return `Shape contrast to ${lastPitch}${zoneTxt}.${zoneContext}`;
+
+  if(zoneReason) return `${seqReason} ${zoneReason}`;
+  return `${seqReason}${zoneTxt}`;
 }
 
 // ─── At-Bat Tab ───────────────────────────────────────────────────────────────
@@ -1643,42 +1669,53 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       {showSub&&(
         <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:10,marginBottom:10}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <div style={{fontSize:10,fontWeight:800,color:C.textSoft,textTransform:"uppercase",letterSpacing:"0.08em"}}>Substitution</div>
-            <button onClick={()=>{setShowSub(false);setSubQuery("");setSubSlot(null);}} style={{fontSize:10,background:"none",border:"none",cursor:"pointer",color:C.textSoft,fontFamily:"'Neuton','Nunito',serif"}}>✕</button>
+            <div style={{fontSize:10,fontWeight:800,color:C.textSoft,textTransform:"uppercase",letterSpacing:"0.08em"}}>
+              {subSlot!==null?`Sub — replace slot ${subSlot+1} (${lineup?.[subSlot]?.name||"—"})` : "Substitution — pick a slot"}
+            </div>
+            <button onClick={()=>{setShowSub(false);setSubQuery("");setSubSlot(null);setSubApiResults([]);}} style={{fontSize:10,background:"none",border:"none",cursor:"pointer",color:C.textSoft,fontFamily:"'Neuton','Nunito',serif"}}>✕</button>
           </div>
-          {/* Slot selector */}
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+          {/* Search first */}
+          <input value={subQuery} onChange={e=>setSubQuery(e.target.value)}
+            placeholder="Search any DD card batter..."
+            style={{...S.input,width:"100%",boxSizing:"border-box",marginBottom:6}}/>
+          {subApiLoading&&<div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>Searching DD cards...</div>}
+          {!subApiLoading&&subQuery.length>=2&&subApiResults.length===0&&(
+            <div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>No results found</div>
+          )}
+          {subApiResults.length>0&&subSlot===null&&(
+            <div style={{fontSize:10,color:C.warn,marginBottom:6,fontWeight:600}}>Select a lineup slot below to sub this player in</div>
+          )}
+          {subApiResults.map(b=>(
+            <div key={b.name+(b.ovr||"")} onClick={()=>{
+              if(subSlot!==null){
+                onSub(subSlot,b);setShowSub(false);setSubQuery("");setSubSlot(null);setSubApiResults([]);
+              }
+            }} style={{
+              padding:"8px 10px",background:subSlot!==null?C.surface:"rgba(0,0,0,0.03)",
+              borderRadius:6,marginBottom:3,cursor:subSlot!==null?"pointer":"default",
+              display:"flex",justifyContent:"space-between",alignItems:"center",
+              opacity:subSlot!==null?1:0.7,
+            }}>
+              <div>
+                <span style={{fontWeight:700,fontSize:12,color:C.text}}>{b.name}</span>
+                {b.rarity&&<span style={{fontSize:9,color:C.textSoft,marginLeft:6}}>{b.rarity}</span>}
+              </div>
+              <span style={{fontSize:10,color:C.textSoft,fontWeight:600}}>{b.bat}H{b.ovr?` · ${b.ovr}`:""}</span>
+            </div>
+          ))}
+          {/* Slot picker below search results */}
+          <div style={{fontSize:9,fontWeight:700,color:C.textSoft,textTransform:"uppercase",marginTop:8,marginBottom:4}}>
+            {subSlot===null?"Tap slot to replace:":"Slot selected — tap a player above to confirm"}
+          </div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
             {lineup&&lineup.map((b,i)=>(
-              <button key={i} onClick={()=>{setSubSlot(i);setSubQuery("");setSubApiResults([]);}} style={{
+              <button key={i} onClick={()=>setSubSlot(subSlot===i?null:i)} style={{
                 padding:"4px 8px",borderRadius:6,fontSize:10,fontWeight:700,fontFamily:"'Neuton','Nunito',serif",
                 background:subSlot===i?C.green:C.surface,color:subSlot===i?"#fff":C.textMid,
                 border:`1px solid ${subSlot===i?C.green:C.border}`,cursor:"pointer",
               }}>{i+1}. {b.name||"—"}</button>
             ))}
           </div>
-          {subSlot!==null&&(
-            <>
-              <input value={subQuery} onChange={e=>setSubQuery(e.target.value)}
-                placeholder="Search DD card name..."
-                style={{...S.input,width:"100%",boxSizing:"border-box",marginBottom:4}}/>
-              {subApiLoading&&<div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>Searching...</div>}
-              {!subApiLoading&&subQuery.length>=2&&subApiResults.length===0&&(
-                <div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>No results found</div>
-              )}
-              {subApiResults.map(b=>(
-                <div key={b.name+(b.ovr||"")} onClick={()=>{onSub(subSlot,b);setShowSub(false);setSubQuery("");setSubSlot(null);setSubApiResults([]);}} style={{
-                  padding:"8px 10px",background:C.surface,borderRadius:6,marginBottom:3,cursor:"pointer",
-                  display:"flex",justifyContent:"space-between",alignItems:"center",
-                }}>
-                  <div>
-                    <span style={{fontWeight:700,fontSize:12,color:C.text}}>{b.name}</span>
-                    {b.rarity&&<span style={{fontSize:9,color:C.textSoft,marginLeft:6}}>{b.rarity}</span>}
-                  </div>
-                  <span style={{fontSize:10,color:C.textSoft,fontWeight:600}}>{b.bat}H{b.ovr?` · ${b.ovr}`:""}</span>
-                </div>
-              ))}
-            </>
-          )}
         </div>
       )}
 
