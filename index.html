@@ -3,19 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Pitch IQ</title>
+<title>Maddux.io</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; background: #f5f2ec; font-family: 'Nunito', sans-serif; }
+  html, body { height: 100%; background: #f5f2ec; font-family: 'Neuton', 'Nunito', serif; }
   #root { min-height: 100vh; }
   input, select, button, textarea { font-family: inherit; }
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 </style>
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Neuton:wght@400;700;800&family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
 <div id="root"></div>
@@ -133,13 +133,79 @@ async function mlbFetch(path) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-const C = {
-  bg:"#f5f2ec", surface:"#edeae2", border:"#d8d4ca",
-  green:"#2d6a4f", greenMid:"#40916c", greenLight:"#d8f3dc", greenDim:"rgba(45,106,79,0.08)",
-  text:"#1a2e22", textMid:"#4a6355", textSoft:"#8a9e93",
-  warn:"#b5451b", warnLight:"#fce8e0", gold:"#b5811b", goldLight:"#fdf3dc",
-  blue:"#1a6fb5", blueLight:"#dbeeff", white:"#ffffff",
+// ─── Color Palettes ──────────────────────────────────────────────────────────
+const PALETTES = {
+  green: {
+    name:"Classic Green",
+    bg:"#f5f2ec", surface:"#edeae2", border:"#d8d4ca",
+    primary:"#2d6a4f", primaryMid:"#40916c", primaryLight:"#d8f3dc", primaryDim:"rgba(45,106,79,0.08)",
+    text:"#1a2e22", textMid:"#4a6355", textSoft:"#8a9e93",
+    warn:"#b5451b", warnLight:"#fce8e0", gold:"#b5811b", goldLight:"#fdf3dc",
+    blue:"#1a6fb5", blueLight:"#dbeeff", white:"#ffffff",
+    header:"#2d6a4f", headerText:"#ffffff",
+  },
+  navy: {
+    name:"Navy & Gold",
+    bg:"#f0f2f5", surface:"#e2e6ec", border:"#c8cfda",
+    primary:"#1a2e5a", primaryMid:"#2d4a8a", primaryLight:"#dce5f7", primaryDim:"rgba(26,46,90,0.08)",
+    text:"#0f1e3a", textMid:"#3a4f6e", textSoft:"#7a8fa8",
+    warn:"#b5811b", warnLight:"#fdf3dc", gold:"#c9a227", goldLight:"#fdf3dc",
+    blue:"#1a6fb5", blueLight:"#dbeeff", white:"#ffffff",
+    header:"#1a2e5a", headerText:"#f5c518",
+  },
+  purple: {
+    name:"Purple & White",
+    bg:"#f8f5ff", surface:"#ede8f8", border:"#d0c8e8",
+    primary:"#5b2d8e", primaryMid:"#7b44b8", primaryLight:"#ede8f8", primaryDim:"rgba(91,45,142,0.08)",
+    text:"#2a1040", textMid:"#5a3a7a", textSoft:"#9a82b8",
+    warn:"#b5451b", warnLight:"#fce8e0", gold:"#b5811b", goldLight:"#fdf3dc",
+    blue:"#1a6fb5", blueLight:"#dbeeff", white:"#ffffff",
+    header:"#5b2d8e", headerText:"#ffffff",
+  },
+  red: {
+    name:"Gray & Red",
+    bg:"#f5f5f5", surface:"#e8e8e8", border:"#d0d0d0",
+    primary:"#b5151b", primaryMid:"#d42028", primaryLight:"#fde8e8", primaryDim:"rgba(181,21,27,0.08)",
+    text:"#1a1a1a", textMid:"#4a4a4a", textSoft:"#888888",
+    warn:"#b5811b", warnLight:"#fdf3dc", gold:"#b5811b", goldLight:"#fdf3dc",
+    blue:"#1a6fb5", blueLight:"#dbeeff", white:"#ffffff",
+    header:"#2a2a2a", headerText:"#ffffff",
+  },
+  pink: {
+    name:"Pink & Black",
+    bg:"#fff0f5", surface:"#ffe0ec", border:"#f0b8ce",
+    primary:"#1a1a1a", primaryMid:"#333333", primaryLight:"#ffe0ec", primaryDim:"rgba(26,26,26,0.08)",
+    text:"#1a1a1a", textMid:"#4a2a35", textSoft:"#9a6878",
+    warn:"#e0206a", warnLight:"#ffe0ec", gold:"#b5811b", goldLight:"#fdf3dc",
+    blue:"#1a6fb5", blueLight:"#dbeeff", white:"#ffffff",
+    header:"#1a1a1a", headerText:"#ff6fa8",
+  },
 };
+
+// Global palette state -- read/write localStorage
+let _palette = PALETTES[localStorage.getItem('maddux_palette')||'green'] || PALETTES.green;
+function getPalette(){ return _palette; }
+function setPalette(key){
+  _palette = PALETTES[key]||PALETTES.green;
+  localStorage.setItem('maddux_palette',key);
+  document.body.style.background=_palette.bg;
+}
+// Apply initial palette to body
+document.body.style.background=_palette.bg;
+// Map legacy C references to palette
+const C = new Proxy({},{
+  get(_,k){
+    const p=_palette;
+    const map={
+      bg:p.bg, surface:p.surface, border:p.border,
+      green:p.primary, greenMid:p.primaryMid, greenLight:p.primaryLight, greenDim:p.primaryDim,
+      text:p.text, textMid:p.textMid, textSoft:p.textSoft,
+      warn:p.warn, warnLight:p.warnLight, gold:p.gold, goldLight:p.goldLight,
+      blue:p.blue, blueLight:p.blueLight, white:p.white,
+    };
+    return map[k]??p[k];
+  }
+});
 
 // ─── MLB The Show API helpers ─────────────────────────────────────────────────
 // Normalise pitch name from API to our internal names
@@ -669,7 +735,7 @@ function GameTypeScreen({onSelect}) {
     {id:"event", label:"Event", sub:"6 innings", color:"#6c3483", hover:"#8e44ad"},
   ];
   return(
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px",background:"#f5f2ec"}}>
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px",background:_palette.bg}}>
       <div style={{width:"100%",maxWidth:380}}>
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{fontSize:36,marginBottom:8}}>⚾</div>
@@ -940,17 +1006,21 @@ function getFullReason(lastPitch,lastZone,recPitch,recZone,score){
 }
 
 // ─── At-Bat Tab ───────────────────────────────────────────────────────────────
-function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,onEndGame,onUndo,onSetBalls,onSetStrikes,onAddRun}){
+function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,onEndGame,onUndo,onSetBalls,onSetStrikes,onAddRun,onPitcherSwap}){
   const{pitcherHand,pitches,sequence,outcomes,gameLog,lineup,batterIdx,outs,inning,bases}=session;
   const balls=session.balls||0;
   const strikes=session.strikes||0;
   const setBalls=onSetBalls;
   const setStrikes=onSetStrikes;
   const[selectedZone,setSelectedZone]=useState(null);
-  const[selectedPitch,setSelectedPitch]=useState(pitches[0].type);
+  const[selectedPitch,setSelectedPitch]=useState(pitches[0]?.type||"");
   const[showSub,setShowSub]=useState(false);
   const[subQuery,setSubQuery]=useState("");
   const[subSlot,setSubSlot]=useState(null);
+  const[showPSwap,setShowPSwap]=useState(false);
+  const[pSwapQuery,setPSwapQuery]=useState("");
+  const[pSwapResults,setPSwapResults]=useState([]);
+  const[pSwapLoading,setPSwapLoading]=useState(false);
   const[contactPending,setContactPending]=useState(null);
   const[contactClass,setContactClass]=useState(null);
   const[hitResult,setHitResult]=useState(null);
@@ -1043,17 +1113,14 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
 
       const recZ=ZONE_REC[p.type]?.[effectiveBatterHand]||"2-2";
 
-      // --- HARD CAPS: remove from consideration entirely ---
-      if(zoneRepeatCapped(recZ)) return null;
-      if(pitchZoneCapped(p.type,recZ)) return null;
-
-      // Hard cap: no more than 2 consecutive non-FB pitches in a row
+      // No hard caps -- all pitches always shown. Apply score penalties instead.
+      // Track consecutive patterns for penalty calculation
       const last2Types=sequence.slice(-2).map(e=>e.pitch);
-      if(!isFB && last2Types.length===2 && last2Types.every(t=>!FB_TYPES.has(t))) return null;
-
-      // Hard cap: no more than 3 consecutive FB pitches in a row
       const last3Types=sequence.slice(-3).map(e=>e.pitch);
-      if(isFB && last3Types.length===3 && last3Types.every(t=>FB_TYPES.has(t))) return null;
+      const twoConsecNonFB=!isFB&&last2Types.length===2&&last2Types.every(t=>!FB_TYPES.has(t));
+      const threeConsecFB=isFB&&last3Types.length===3&&last3Types.every(t=>FB_TYPES.has(t));
+      const sameZone3=zoneRepeatCapped(recZ);
+      const samePitchZone2=pitchZoneCapped(p.type,recZ);
 
       // Factor 1: Tunnel score (0-100 scale)
       let tunnelFactor=lastThrown
@@ -1118,22 +1185,30 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       // Steal threat: boost fastball
       const stealBonus=stealThreat&&isFB?15:0;
 
+      // Penalties for repetitive patterns (no hard removal -- all pitches always shown)
+      let patternPenalty=0;
+      if(twoConsecNonFB) patternPenalty+=30;
+      if(threeConsecFB)  patternPenalty+=25;
+      if(sameZone3)      patternPenalty+=25;
+      if(samePitchZone2) patternPenalty+=20;
+
       // Equal-weight composite score
       const composite=(tunnelFactor+countFactor+ratioFactor+zoneFactor+outcomeFactor)/5;
-      const finalScore=Math.round(Math.min(100,Math.max(0,composite+zoneBonus*0.3+stealBonus)));
+      const finalScore=Math.round(Math.min(100,Math.max(0,composite+zoneBonus*0.3+stealBonus-patternPenalty)));
 
       return{...p,score:finalScore,chaseWeight:effectiveChaseWeight,stealThreat};
     })
-    .filter(Boolean)
     .sort((a,b)=>b.score-a.score);
   },[pitches,countKey,lastThrown,lastZone,outcomes,pitcherHand,pitchZoneHistory,gameLog,effectiveBatterHand,sequence,session,balls,strikes]);
 
   // Active rec drives both the box and the blue baseball
   const activePitch=scored.find(p=>selectedPitch&&p.type===selectedPitch)||scored[0];
-  // Keep selectedPitch in sync with top recommendation when null
+  // Always sync selectedPitch to top recommendation when current selection isn't valid
   useEffect(()=>{
-    if(!selectedPitch&&scored.length>0) setSelectedPitch(scored[0].type);
-  },[scored,selectedPitch]);
+    if(scored.length>0&&(!selectedPitch||!scored.find(p=>p.type===selectedPitch))){
+      setSelectedPitch(scored[0].type);
+    }
+  },[scored]);
   const chaseW=activePitch?.chaseWeight||0;
   // Deterministic chase decision per at-bat state (use sequence length as seed to avoid re-render flicker)
   const useChase=chaseW>0&&((sequence.length*17+strikes*7)%100)<(chaseW*100);
@@ -1347,6 +1422,17 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
   },[subQuery]);
   const subResults=subApiResults;
 
+  useEffect(()=>{
+    if(pSwapQuery.length<2){setPSwapResults([]);return;}
+    const t=setTimeout(async()=>{
+      setPSwapLoading(true);
+      try{const res=await searchPitchers(pSwapQuery);setPSwapResults(res.slice(0,6));}
+      catch(e){setPSwapResults([]);}
+      finally{setPSwapLoading(false);}
+    },400);
+    return()=>clearTimeout(t);
+  },[pSwapQuery]);
+
   const currentBases=session.bases||{first:null,second:null,third:null};
   const stealThreat=activePitch?.stealThreat;
 
@@ -1400,7 +1486,10 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
           <div>
             <div style={{fontSize:9,fontWeight:800,color:C.greenMid,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:2}}>Pitcher</div>
             <div style={{fontSize:13,fontWeight:800,color:C.text,lineHeight:1.2}}>{session.pitcherName||"—"}</div>
-            <div style={{fontSize:10,color:C.textSoft,fontWeight:600,marginBottom:4}}>{pitcherHand==="L"?"LHP":"RHP"}</div>
+            <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:4}}>
+              <span style={{fontSize:10,color:C.textSoft,fontWeight:600}}>{pitcherHand==="L"?"LHP":"RHP"}</span>
+              <button onClick={()=>{setShowPSwap(!showPSwap);setPSwapQuery("");setPSwapResults([]);}} style={{...S.ghostBtn,padding:"1px 6px",fontSize:8}}>Swap</button>
+            </div>
             <div style={{display:"flex",flexDirection:"column",gap:2}}>
               {(()=>{
                 const topVelo=pitches.length>0?Math.max(...pitches.map(p=>p.velo||0)):null;
@@ -1493,6 +1582,44 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
               ))}
             </>
           )}
+        </div>
+      )}
+
+      {/* Pitcher swap panel */}
+      {showPSwap&&(
+        <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:10,marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div style={{fontSize:10,fontWeight:800,color:C.textSoft,textTransform:"uppercase",letterSpacing:"0.08em"}}>New Pitcher</div>
+            <button onClick={()=>{setShowPSwap(false);setPSwapQuery("");setPSwapResults([]);}} style={{fontSize:10,background:"none",border:"none",cursor:"pointer",color:C.textSoft,fontFamily:"'Neuton','Nunito',serif"}}>✕</button>
+          </div>
+          <input value={pSwapQuery} onChange={e=>setPSwapQuery(e.target.value)}
+            placeholder="Search DD card name..."
+            style={{...S.input,width:"100%",boxSizing:"border-box",marginBottom:4}}/>
+          {pSwapLoading&&<div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>Searching...</div>}
+          {!pSwapLoading&&pSwapQuery.length>=2&&pSwapResults.length===0&&(
+            <div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>No results found</div>
+          )}
+          {pSwapResults.map(p=>(
+            <div key={p.name+(p.ovr||"")} onClick={async()=>{
+              // Fetch full card to get pitches
+              let fullCard=p;
+              if(p.uuid){
+                const data=await fetchItemByUuid(p.uuid);
+                if(data) fullCard=apiCardToPitcher(data);
+              }
+              onPitcherSwap(fullCard);
+              setShowPSwap(false);setPSwapQuery("");setPSwapResults([]);
+            }} style={{
+              padding:"9px 10px",background:C.surface,borderRadius:6,marginBottom:3,cursor:"pointer",
+              display:"flex",justifyContent:"space-between",alignItems:"center",
+            }}>
+              <div>
+                <span style={{fontWeight:700,fontSize:12,color:C.text}}>{p.name}</span>
+                {p.rarity&&<span style={{fontSize:9,color:C.textSoft,marginLeft:6}}>{p.rarity}</span>}
+              </div>
+              <span style={{fontSize:10,color:C.textSoft,fontWeight:600}}>{p.hand}HP{p.ovr?` · ${p.ovr}`:""}</span>
+            </div>
+          ))}
         </div>
       )}
 
@@ -1798,9 +1925,14 @@ function LineupTab({session}){
     const name=batter?.name||`Batter ${selected+1}`;
     const log=batterLog[name]||[];
     const outs=log.filter(e=>e.isOut).length;
-    const hits=log.filter(e=>e.onBase).length;
+    const hits=log.filter(e=>e.onBase&&e.outcomeId!=="walk").length;
     const ks=log.filter(e=>e.outcomeId==="look"||e.outcomeId==="swing").length;
-    const bb=log.filter(e=>e.outcomeId==="walk").length;
+    const bb=log.filter(e=>e.outcomeId==="walk"||e.outcome==="Walk").length;
+    const fouls=log.filter(e=>e.outcomeId==="foul").length;
+    const balls=log.filter(e=>e.outcomeId==="ball"&&e.outcome!=="Walk").length;
+    const strikes=log.filter(e=>e.outcomeId==="look"||e.outcomeId==="swing"||e.outcomeId==="foul").length;
+    const hard=log.filter(e=>e.outcomeId==="hard"||e.contactClass==="hard").length;
+    const weak=log.filter(e=>e.outcomeId==="weak"||e.contactClass==="weak").length;
 
     return(
       <div style={{padding:"16px"}}>
@@ -1816,13 +1948,15 @@ function LineupTab({session}){
 
         {/* Summary stats */}
         {log.length>0&&(
-          <div style={{display:"flex",gap:10,marginBottom:14}}>
-            {[["Pitches",log.length],["Outs",outs],["Hits",hits],["K",ks],["BB",bb]].map(([lbl,val])=>(
-              <div key={lbl} style={{flex:1,background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"8px 4px",textAlign:"center"}}>
-                <div style={{fontSize:16,fontWeight:800,color:C.green}}>{val}</div>
-                <div style={{fontSize:9,color:C.textSoft,fontWeight:700,textTransform:"uppercase"}}>{lbl}</div>
-              </div>
-            ))}
+          <div style={{marginBottom:14}}>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {[["Pitches",log.length,null],["Balls",balls,null],["Strikes",strikes,null],["Fouls",fouls,null],["K",ks,C.green],["BB",bb,C.warn],["Outs",outs,C.green],["Hits",hits,C.warn],["Hard",hard,C.warn],["Weak",weak,C.green]].map(([lbl,val,col])=>(
+                <div key={lbl} style={{flex:"0 0 calc(20% - 6px)",minWidth:52,background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"7px 4px",textAlign:"center"}}>
+                  <div style={{fontSize:15,fontWeight:800,color:col||C.text}}>{val}</div>
+                  <div style={{fontSize:8,color:C.textSoft,fontWeight:700,textTransform:"uppercase"}}>{lbl}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1994,8 +2128,8 @@ function LogTab({session}){
 }
 const S={
   root:{background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",fontFamily:"'Nunito',sans-serif",color:C.text},
-  header:{padding:"16px",background:C.green},
-  headerTitle:{fontSize:18,fontWeight:800,color:"#fff"},
+  header:{padding:"16px",background:_palette.header||C.green},
+  headerTitle:{fontSize:18,fontWeight:800,color:_palette.headerText||"#fff"},
   headerSub:{fontSize:11,color:"rgba(255,255,255,0.6)",fontWeight:500,marginTop:1},
   tabBar:{display:"flex",background:C.white,borderBottom:`2px solid ${C.border}`},
   tabOn:{flex:1,padding:"11px 0",fontSize:12,fontWeight:800,fontFamily:"'Nunito',sans-serif",background:"none",border:"none",borderBottom:`3px solid ${C.green}`,color:C.green,cursor:"pointer",marginBottom:-2},
@@ -2046,11 +2180,11 @@ function LoginScreen({onLogin}){
     onLogin(storeUser(trimmed,pin));
   };
   return(
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",background:"#f5f2ec"}}>
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"24px",background:_palette.bg}}>
       <div style={{width:"100%",maxWidth:360}}>
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{fontSize:40,marginBottom:8}}>⚾</div>
-          <div style={{fontSize:24,fontWeight:800,color:"#2d6a4f"}}>Pitch IQ</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#2d6a4f"}}>Maddux.io</div>
           <div style={{fontSize:13,color:"#8a9e93",marginTop:4,fontWeight:500}}>Set up your account to save game history</div>
         </div>
         <div style={{background:"#fff",borderRadius:12,padding:"24px",border:"1.5px solid #d8d4ca"}}>
@@ -2490,6 +2624,42 @@ function StatsTab({user,onBack}){
 }
 
 
+function SettingsTab({paletteKey,onPaletteChange}){
+  return(
+    <div style={{padding:"16px"}}>
+      <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>Settings</div>
+      <div style={{fontSize:11,color:C.textSoft,marginBottom:16,fontWeight:500}}>Choose a color theme for the app.</div>
+      <div style={S.sectionLabel}>Color Theme</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {Object.entries(PALETTES).map(([key,pal])=>{
+          const active=paletteKey===key;
+          return(
+            <button key={key} onClick={()=>onPaletteChange(key)} style={{
+              display:"flex",alignItems:"center",gap:12,padding:"12px 14px",
+              background:pal.white,border:`2px solid ${active?pal.primary:pal.border}`,
+              borderRadius:10,cursor:"pointer",fontFamily:"'Neuton','Nunito',serif",textAlign:"left",
+              boxShadow:active?`0 0 0 3px ${pal.primaryLight}`:"none",
+            }}>
+              <div style={{display:"flex",gap:4,flexShrink:0}}>
+                <div style={{width:20,height:20,borderRadius:"50%",background:pal.header}}/>
+                <div style={{width:20,height:20,borderRadius:"50%",background:pal.primary}}/>
+                <div style={{width:20,height:20,borderRadius:"50%",background:pal.bg,border:`1px solid ${pal.border}`}}/>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:800,color:pal.text}}>{pal.name}</div>
+              </div>
+              {active&&<div style={{fontSize:12,color:pal.primary,fontWeight:800}}>✓ Active</div>}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{marginTop:20,fontSize:10,color:C.textSoft,fontWeight:500}}>
+        Theme change takes effect immediately. Reload the page if colors look off.
+      </div>
+    </div>
+  );
+}
+
 function HistoryTab({user}){
   const [games,setGames]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -2577,6 +2747,8 @@ function HistoryTab({user}){
 function App(){
   const [tab,setTab]=useState("setup");
   const [session,setSession]=useState(null);
+  const [paletteKey,setPaletteKey]=useState(()=>localStorage.getItem('maddux_palette')||'green');
+  const handlePaletteChange=(key)=>{setPalette(key);setPaletteKey(key);};
   const [showScorePrompt,setShowScorePrompt]=useState(false);
   const [scoreInput,setScoreInput]=useState({my:0,opp:0});
   const [saving,setSaving]=useState(false);
@@ -2642,6 +2814,16 @@ function App(){
     if(!prev.lineup) return prev;
     const nl=[...prev.lineup];nl[slot]={name:nb.name,bat:nb.bat,custom:false};return{...prev,lineup:nl};
   }),[]);
+  const handlePitcherSwap=useCallback((newPitcher)=>setSession(prev=>({
+    ...prev,
+    pitcherName:newPitcher.name,
+    pitcherHand:newPitcher.hand||"R",
+    pitches:newPitcher.pitches||[],
+    pitcherOvr:newPitcher.ovr||0,
+    pitcherControl:newPitcher.control||null,
+    pitcherMovement:newPitcher.movement||null,
+    sequence:[], // reset sequence for new pitcher
+  })),[]);
   const handleAddRun=useCallback((n=1)=>setSession(prev=>({...prev,myScore:prev.myScore+n})),[]);
   const handleUpdateBases=useCallback((b)=>setSession(prev=>({...prev,bases:b})),[]);
   const handleSaveGame=useCallback(async()=>{
@@ -2655,7 +2837,7 @@ function App(){
   },[session,user]);
 
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
-  const TABS_NO_GAME=[{id:"setup",label:"Setup"},{id:"history",label:"History"}];
+  const TABS_NO_GAME=[{id:"setup",label:"Setup"},{id:"history",label:"History"},{id:"settings",label:"⚙"}];
   const TABS_IN_GAME=[{id:"atbat",label:"At-Bat"},{id:"lineup",label:"Lineup"},{id:"log",label:"Log"},{id:"history",label:"History"}];
   const TABS=session?TABS_IN_GAME:TABS_NO_GAME;
 
@@ -2663,11 +2845,11 @@ function App(){
 
   return(
     <div style={S.root}>
-      <div style={S.header}>
+      <div style={{...S.header,background:_palette.header||C.green}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:20}}>⚾</span>
-            <div style={S.headerTitle}>Pitch IQ</div>
+            <div style={{...S.headerTitle,color:_palette.headerText||"#fff"}}>Maddux.io</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             {session&&(<div style={{display:"flex",gap:10,alignItems:"center"}}>
@@ -2725,7 +2907,7 @@ function App(){
       <div style={S.content}>
         {tab==="setup"&&<SetupTab onComplete={handleSetup} onViewStats={()=>setTab("stats")}/>}
         {tab==="atbat"&&(session
-          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame} onUndo={handleUndo} onSetBalls={handleSetBalls} onSetStrikes={handleSetStrikes} onAddRun={handleAddRun}/>
+          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame} onUndo={handleUndo} onSetBalls={handleSetBalls} onSetStrikes={handleSetStrikes} onAddRun={handleAddRun} onPitcherSwap={handlePitcherSwap}/>
           :<div style={S.emptyState}>Complete setup first.</div>
         )}
         {tab==="lineup"&&(session?<LineupTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
@@ -2743,6 +2925,7 @@ function App(){
         )}
         {tab==="stats"&&<StatsErrorBoundary onBack={()=>setTab(session?"atbat":"setup")}><StatsTab user={user} onBack={()=>setTab(session?"atbat":"setup")}/></StatsErrorBoundary>}
         {tab==="history"&&<HistoryTab user={user}/>}
+        {tab==="settings"&&<SettingsTab paletteKey={paletteKey} onPaletteChange={handlePaletteChange}/>}
       </div>
     </div>
   );
