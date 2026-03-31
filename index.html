@@ -418,17 +418,17 @@ const PITCHERS = [
 
 // ─── Pitch Logic ──────────────────────────────────────────────────────────────
 const PITCH_PROFILES = {
-  "4-Seam FB":  {h:8,  v:14, velo_base:93, type:"fastball"},
-  "2-Seam FB":  {h:14, v:8,  velo_base:91, type:"fastball"},
-  "Cutter":     {h:-3, v:10, velo_base:88, type:"fastball"},
-  "Sinker":     {h:16, v:6,  velo_base:90, type:"fastball"},
-  "Slider":     {h:-4, v:2,  velo_base:84, type:"breaking"},
-  "Sweeper":    {h:-14,v:1,  velo_base:82, type:"breaking"},
-  "Curveball":  {h:-5, v:-8, velo_base:78, type:"breaking"},
-  "12-6 Curve": {h:0,  v:-12,velo_base:76, type:"breaking"},
-  "Changeup":   {h:12, v:5,  velo_base:84, type:"offspeed"},
-  "Splitter":   {h:6,  v:-2, velo_base:84, type:"offspeed"},
-  "Knuckleball":{h:0,  v:0,  velo_base:70, type:"offspeed"},
+  "4-Seam FB":  {h:6,   v:14,  velo_base:93, type:"fastball"},
+  "2-Seam FB":  {h:12,  v:8,   velo_base:91, type:"fastball"},
+  "Cutter":     {h:-3,  v:10,  velo_base:88, type:"fastball"},
+  "Sinker":     {h:14,  v:4,   velo_base:90, type:"fastball"},
+  "Slider":     {h:-8,  v:2,   velo_base:84, type:"breaking"},
+  "Sweeper":    {h:-16, v:4,   velo_base:82, type:"breaking"},
+  "Curveball":  {h:-4,  v:-10, velo_base:78, type:"breaking"},
+  "12-6 Curve": {h:0,   v:-14, velo_base:76, type:"breaking"},
+  "Changeup":   {h:10,  v:5,   velo_base:84, type:"offspeed"},
+  "Splitter":   {h:4,   v:-4,  velo_base:84, type:"offspeed"},
+  "Knuckleball":{h:0,   v:0,   velo_base:70, type:"offspeed"},
 };
 
 const COUNT_LEVERAGE = {
@@ -1001,7 +1001,7 @@ function getFullReason(lastPitch,lastZone,recPitch,recZone,score){
 }
 
 // ─── At-Bat Tab ───────────────────────────────────────────────────────────────
-function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,onEndGame}){
+function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,onEndGame,onUndo}){
   const{pitcherHand,pitches,sequence,outcomes,gameLog,lineup,batterIdx,outs,inning,bases}=session;
   const[selectedZone,setSelectedZone]=useState(null);
   const[selectedPitch,setSelectedPitch]=useState(pitches[0].type);
@@ -1123,20 +1123,26 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       }
       countFactor=Math.max(0,Math.min(100,countFactor));
 
-      // Factor 3: FB:Offspeed ratio enforcement (0-100 scale)
-      // If we've thrown too many FBs recently, boost offspeed; if too few, boost FB
+      // Factor 3: FB:Offspeed ratio + alternating bonus
       let ratioFactor=50;
       if(isFB){
-        // Over target: penalize; under target: boost
         ratioFactor=recentFbPct>targetFbPct
           ?Math.max(0,50-(recentFbPct-targetFbPct)*200)
           :Math.min(100,50+(targetFbPct-recentFbPct)*150);
       } else {
-        // Offspeed/breaking -- inverse of FB ratio pressure
         ratioFactor=recentFbPct<targetFbPct
           ?Math.max(0,50-(targetFbPct-recentFbPct)*200)
           :Math.min(100,50+(recentFbPct-targetFbPct)*150);
       }
+      const lastWasFB=lastThrown?FB_TYPES.has(lastThrown):null;
+      let alternateFactor=50;
+      if(lastWasFB!==null){
+        if(lastWasFB&&!isFB) alternateFactor=75;
+        if(!lastWasFB&&isFB) alternateFactor=75;
+        if(lastWasFB&&isFB)  alternateFactor=35;
+        if(!lastWasFB&&!isFB) alternateFactor=30;
+      }
+      ratioFactor=Math.round((ratioFactor+alternateFactor)/2);
 
       // Factor 4: Zone variety (0-100 scale)
       const zoneCount=pitchZoneHistory[`${p.type}:${recZ}`]||0;
@@ -1344,9 +1350,10 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
         </div>
       )}
 
-      {/* End game button */}
+      {/* End game + undo buttons */}
       {!showEndGame&&(
-        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+          <button onClick={onUndo} disabled={!(session.undoStack?.length>0)} style={{...S.ghostBtn,fontSize:10,padding:"3px 10px",opacity:session.undoStack?.length>0?1:0.35}}>↩ Undo</button>
           <button onClick={()=>setShowEndGame(true)} style={{...S.ghostBtn,fontSize:10,color:C.warn,borderColor:C.warn,padding:"3px 10px"}}>End Game</button>
         </div>
       )}
@@ -1997,7 +2004,7 @@ function App(){
 
   const handleSetup=useCallback((config)=>{
     setSession({...config,sequence:[],outcomes:{},gameLog:[],batterIdx:0,
-      outs:0,inning:1,myScore:0,oppScore:0,inningLog:[],bases:{first:null,second:null,third:null}});
+      outs:0,inning:1,myScore:0,oppScore:0,inningLog:[],bases:{first:null,second:null,third:null},undoStack:[]});
     setTab("atbat");setSavedId(null);
   },[]);
   const handleLogPitch=useCallback((entry)=>{
@@ -2005,15 +2012,24 @@ function App(){
       const no={...prev.outcomes};
       if(entry.isPositive){no[entry.pitch]=(no[entry.pitch]||0)+3;
         if(prev.sequence.length>0){const p2=prev.sequence[prev.sequence.length-1].pitch;no[p2]=(no[p2]||0)+1;}}
-      return{...prev,sequence:[...prev.sequence,entry],gameLog:[...prev.gameLog,entry],outcomes:no};
+      // Save undo snapshot before applying
+      const snapshot={sequence:prev.sequence,gameLog:prev.gameLog,outcomes:{...prev.outcomes},
+        batterIdx:prev.batterIdx,outs:prev.outs,bases:prev.bases,
+        myScore:prev.myScore,oppScore:prev.oppScore,inning:prev.inning};
+      return{...prev,sequence:[...prev.sequence,entry],gameLog:[...prev.gameLog,entry],outcomes:no,
+        undoStack:[...(prev.undoStack||[]),snapshot]};
     });
   },[]);
   const handleAddOut=useCallback(()=>{
     setSession(prev=>{
+      const snapshot={sequence:prev.sequence,gameLog:prev.gameLog,outcomes:{...prev.outcomes},
+        batterIdx:prev.batterIdx,outs:prev.outs,bases:prev.bases,
+        myScore:prev.myScore,oppScore:prev.oppScore,inning:prev.inning};
       const n=prev.outs+1;
       if(n>=3){setShowScorePrompt(true);setScoreInput({my:0,opp:0});
-        return{...prev,outs:0,inning:prev.inning+1,bases:{first:null,second:null,third:null}};}
-      return{...prev,outs:n};
+        return{...prev,outs:0,inning:prev.inning+1,bases:{first:null,second:null,third:null},
+          undoStack:[...(prev.undoStack||[]),snapshot]};}
+      return{...prev,outs:n,undoStack:[...(prev.undoStack||[]),snapshot]};
     });
   },[]);
   const handleScoreSubmit=useCallback(()=>{
@@ -2023,8 +2039,20 @@ function App(){
   },[scoreInput]);
   const handleNewAtBat=useCallback(()=>{
     setSession(prev=>{
+      const snapshot={sequence:prev.sequence,gameLog:prev.gameLog,outcomes:{...prev.outcomes},
+        batterIdx:prev.batterIdx,outs:prev.outs,bases:prev.bases,
+        myScore:prev.myScore,oppScore:prev.oppScore,inning:prev.inning};
       const v=prev.lineup?prev.lineup.filter(b=>b.name):[];
-      return{...prev,sequence:[],batterIdx:v.length>0?(prev.batterIdx+1)%v.length:0};
+      return{...prev,sequence:[],batterIdx:v.length>0?(prev.batterIdx+1)%v.length:0,
+        undoStack:[...(prev.undoStack||[]),snapshot]};
+    });
+  },[]);
+  const handleUndo=useCallback(()=>{
+    setSession(prev=>{
+      const stack=prev.undoStack||[];
+      if(stack.length===0) return prev;
+      const snapshot=stack[stack.length-1];
+      return{...prev,...snapshot,undoStack:stack.slice(0,-1)};
     });
   },[]);
   const handleSub=useCallback((slot,nb)=>setSession(prev=>{
@@ -2111,7 +2139,7 @@ function App(){
       <div style={S.content}>
         {tab==="setup"&&<SetupTab onComplete={handleSetup}/>}
         {tab==="atbat"&&(session
-          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame}/>
+          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame} onUndo={handleUndo}/>
           :<div style={S.emptyState}>Complete setup first.</div>
         )}
         {tab==="visuals"&&(session?<VisualsTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
