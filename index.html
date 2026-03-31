@@ -1165,12 +1165,14 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
 
   // After recording an out, prompt runners to advance
   const triggerOutAdvancement=()=>{
+    // Don't prompt for advancement on 3rd out -- inning is over, bases clear
+    if(outs+1>=3){setShowOutConfirm(true);return;}
     const cb=session.bases||{first:null,second:null,third:null};
     const occupied=[
       cb.third&&{base:"third",name:cb.third.name||"Runner"},
       cb.second&&{base:"second",name:cb.second.name||"Runner"},
       cb.first&&{base:"first",name:cb.first.name||"Runner"},
-    ].filter(Boolean); // lead runner first
+    ].filter(Boolean);
     if(occupied.length>0){
       setRunnersToAdvance(occupied);setRunnerAdvanceIdx(0);
     } else {
@@ -1829,74 +1831,57 @@ function LineupTab({session}){
           <div style={S.emptyState}>No pitches logged for this batter yet.</div>
         ):(
           <>
-            {/* Zone heatmap with batter silhouette */}
+            {/* Zone chart */}
             <div style={S.sectionLabel}>Zone Chart</div>
-            <div style={{...S.card,marginBottom:12,padding:"10px 8px"}}>
+            <div style={{...S.card,marginBottom:12,padding:"12px 10px"}}>
               {(()=>{
-                const isLHB=batter?.bat==="L"||batter?.bat==="S";
                 const zoneMap={};
                 log.forEach(e=>{
                   if(!e.zone) return;
-                  if(!zoneMap[e.zone]) zoneMap[e.zone]={total:0,outs:0,hits:0};
+                  if(!zoneMap[e.zone]) zoneMap[e.zone]={total:0,outs:0,hits:0,hard:0,weak:0,ks:0};
                   zoneMap[e.zone].total++;
                   if(e.isOut) zoneMap[e.zone].outs++;
                   if(e.onBase) zoneMap[e.zone].hits++;
+                  if(e.outcomeId==="hard"||e.contactClass==="hard") zoneMap[e.zone].hard++;
+                  if(e.outcomeId==="weak"||e.contactClass==="weak") zoneMap[e.zone].weak++;
+                  if(e.outcomeId==="look"||e.outcomeId==="swing") zoneMap[e.zone].ks++;
                 });
-                const maxZ=Math.max(1,...Object.values(zoneMap).map(z=>z.total));
-
-                // Batter silhouette SVG (simplified standing figure)
-                const silhouette=(
-                  <svg width="28" height="80" viewBox="0 0 28 80" style={{flexShrink:0}}>
-                    {/* head */}
-                    <circle cx="14" cy="9" r="7" fill="rgba(45,106,79,0.25)" stroke="rgba(45,106,79,0.5)" strokeWidth="1.2"/>
-                    {/* body */}
-                    <rect x="8" y="17" width="12" height="26" rx="3" fill="rgba(45,106,79,0.2)" stroke="rgba(45,106,79,0.4)" strokeWidth="1.2"/>
-                    {/* legs */}
-                    <rect x="8" y="41" width="5" height="22" rx="2" fill="rgba(45,106,79,0.2)" stroke="rgba(45,106,79,0.4)" strokeWidth="1"/>
-                    <rect x="15" y="41" width="5" height="22" rx="2" fill="rgba(45,106,79,0.2)" stroke="rgba(45,106,79,0.4)" strokeWidth="1"/>
-                    {/* bat arm */}
-                    {isLHB
-                      ? <line x1="20" y1="24" x2="27" y2="4" stroke="rgba(181,129,27,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
-                      : <line x1="8" y1="24" x2="1" y2="4" stroke="rgba(181,129,27,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
-                    }
-                  </svg>
-                );
-
                 return(
-                  <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>
-                    {/* Silhouette left side for LHB */}
-                    {isLHB&&silhouette}
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2,flex:"0 0 auto",width:160}}>
-                      {Array.from({length:25},(_,idx)=>{
-                        const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
-                        const z=zoneMap[id],inZ=row>=1&&row<=3&&col>=1&&col<=3;
-                        const hitPct=z?Math.round((z.hits/z.total)*100):0;
-                        const outPct=z?Math.round((z.outs/z.total)*100):0;
-                        const bg=z
-                          ? z.hits>z.outs
-                            ? `rgba(181,69,27,${0.15+(z.hits/z.total)*0.7})`  // red = danger zone
-                            : `rgba(45,106,79,${0.15+(z.outs/z.total)*0.7})`  // green = out zone
-                          : inZ?C.white:C.surface;
-                        return(
-                          <div key={id} style={{height:34,borderRadius:4,background:bg,
-                            border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",
-                            alignItems:"center",justifyContent:"center"}}>
-                            {z&&<>
-                              <span style={{fontSize:9,fontWeight:800,color:"#fff",lineHeight:1}}>{z.total}</span>
-                              <span style={{fontSize:7,color:"rgba(255,255,255,0.8)",lineHeight:1}}>{hitPct}%H</span>
-                            </>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {/* Silhouette right side for RHB */}
-                    {!isLHB&&silhouette}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3,marginBottom:10}}>
+                    {Array.from({length:25},(_,idx)=>{
+                      const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
+                      const z=zoneMap[id],inZ=row>=1&&row<=3&&col>=1&&col<=3;
+                      // Red = high contact/hits (danger), Blue = high K/weak contact (target)
+                      const contactScore=z?(z.hits+z.hard)/z.total:0;
+                      const targetScore=z?(z.ks+z.weak)/z.total:0;
+                      let bg=inZ?C.white:C.surface;
+                      if(z){
+                        if(contactScore>targetScore){
+                          bg=`rgba(180,30,30,${0.15+contactScore*0.75})`;
+                        } else {
+                          bg=`rgba(26,111,181,${0.15+targetScore*0.75})`;
+                        }
+                      }
+                      const textColor=z?"#fff":C.textSoft;
+                      return(
+                        <div key={id} style={{height:40,borderRadius:4,background:bg,
+                          border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",
+                          alignItems:"center",justifyContent:"center"}}>
+                          {z&&<>
+                            <span style={{fontSize:10,fontWeight:800,color:textColor,lineHeight:1}}>{z.total}</span>
+                            <span style={{fontSize:7,color:"rgba(255,255,255,0.85)",lineHeight:1.3}}>
+                              {contactScore>targetScore?`${Math.round(contactScore*100)}%H`:`${Math.round(targetScore*100)}%K`}
+                            </span>
+                          </>}
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })()}
-              <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:8}}>
-                <span style={{fontSize:9,fontWeight:700,color:"rgba(181,69,27,0.9)"}}>🔴 Danger (hits)</span>
-                <span style={{fontSize:9,fontWeight:700,color:C.green}}>🟢 Out zone</span>
+              <div style={{display:"flex",gap:16,justifyContent:"center"}}>
+                <span style={{fontSize:9,fontWeight:700,color:"rgba(180,30,30,0.9)"}}>🔴 Avoid — high contact/hits</span>
+                <span style={{fontSize:9,fontWeight:700,color:"rgba(26,111,181,0.9)"}}>🔵 Target — K/weak contact</span>
               </div>
             </div>
 
@@ -2112,88 +2097,174 @@ class StatsErrorBoundary extends React.Component{
 }
 
 function StatsTab({user,onBack}){
-  const [allLog,setAllLog]=useState([]);
-  const [loading,setLoading]=useState(true);
-  const [view,setView]=useState("pitcher");
-  const [selected,setSelected]=useState(null);
+  const[allLog,setAllLog]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[view,setView]=useState("pitcher");
+  const[selected,setSelected]=useState(null);
+  const[search,setSearch]=useState("");
+  const[sort,setSort]=useState("pitches");
   useEffect(()=>{loadAllPitchLog(user).then(d=>{setAllLog(d);setLoading(false);});},[user]);
+
+  const pct=(n,d)=>d>0?Math.round((n/d)*100):0;
+  const fmt=(n,d)=>`${pct(n,d)}% (${n}/${d})`;
+
+  // Classify contact
+  const isHard=(p)=>p.outcome_id==="hard"||p.contact_class==="hard";
+  const isWeak=(p)=>p.outcome_id==="weak"||p.contact_class==="weak";
 
   const pitcherStats=useMemo(()=>{
     const map={};
     allLog.forEach(p=>{
       const k=p.pitcher_name||"Unknown";
-      if(!map[k]) map[k]={name:k,pitches:0,outs:0,hits:0,walks:0,ks:0,counts:{}};
-      map[k].pitches++;
+      if(!map[k]) map[k]={name:k,n:0,outs:0,hits:0,walks:0,ks:0,hard:0,weak:0,counts:{},matchups:{}};
+      map[k].n++;
       if(p.is_out) map[k].outs++;
-      if(p.on_base) map[k].hits++;
-      if(p.outcome_id==="walk") map[k].walks++;
+      if(p.on_base&&p.outcome_id!=="walk") map[k].hits++;
+      if(p.outcome_id==="walk"||p.outcome==="Walk") map[k].walks++;
       if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].ks++;
+      if(isHard(p)) map[k].hard++;
+      if(isWeak(p)) map[k].weak++;
       map[k].counts[p.pitch_type]=(map[k].counts[p.pitch_type]||0)+1;
+      // Handedness matchup
+      const mkey=`${p.batter_hand||"?"}`;
+      if(!map[k].matchups[mkey]) map[k].matchups[mkey]={n:0,outs:0,hits:0,ks:0,walks:0};
+      map[k].matchups[mkey].n++;
+      if(p.is_out) map[k].matchups[mkey].outs++;
+      if(p.on_base&&p.outcome_id!=="walk") map[k].matchups[mkey].hits++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].matchups[mkey].ks++;
+      if(p.outcome_id==="walk"||p.outcome==="Walk") map[k].matchups[mkey].walks++;
     });
-    return Object.values(map).sort((a,b)=>b.pitches-a.pitches);
+    return Object.values(map);
   },[allLog]);
 
   const batterStats=useMemo(()=>{
     const map={};
     allLog.forEach(p=>{
       const k=p.batter_name||"";if(!k.trim()) return;
-      if(!map[k]) map[k]={name:k,pas:0,outs:0,hits:0,pr:{}};
-      map[k].pas++;
+      if(!map[k]) map[k]={name:k,n:0,outs:0,hits:0,walks:0,ks:0,hard:0,weak:0,pr:{}};
+      map[k].n++;
       if(p.is_out) map[k].outs++;
-      if(p.on_base) map[k].hits++;
-      if(!map[k].pr[p.pitch_type]) map[k].pr[p.pitch_type]={outs:0,hits:0,total:0};
-      map[k].pr[p.pitch_type].total++;
-      if(p.is_out) map[k].pr[p.pitch_type].outs++;
-      if(p.on_base) map[k].pr[p.pitch_type].hits++;
+      if(p.on_base&&p.outcome_id!=="walk") map[k].hits++;
+      if(p.outcome_id==="walk"||p.outcome==="Walk") map[k].walks++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].ks++;
+      if(isHard(p)) map[k].hard++;
+      if(isWeak(p)) map[k].weak++;
+      const pk=p.pitch_type;
+      if(!map[k].pr[pk]) map[k].pr[pk]={n:0,outs:0,hits:0,ks:0,hard:0,weak:0};
+      map[k].pr[pk].n++;
+      if(p.is_out) map[k].pr[pk].outs++;
+      if(p.on_base&&p.outcome_id!=="walk") map[k].pr[pk].hits++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].pr[pk].ks++;
+      if(isHard(p)) map[k].pr[pk].hard++;
+      if(isWeak(p)) map[k].pr[pk].weak++;
     });
-    return Object.values(map).sort((a,b)=>b.pas-a.pas);
+    return Object.values(map);
   },[allLog]);
 
   const countStats=useMemo(()=>{
     const map={};
     allLog.forEach(p=>{
       const k=`${p.balls||0}-${p.strikes||0}`;
-      if(!map[k]) map[k]={count:k,total:0,outs:0,hits:0,ks:0};
-      map[k].total++;
+      if(!map[k]) map[k]={count:k,n:0,outs:0,hits:0,ks:0,walks:0,hard:0,weak:0};
+      map[k].n++;
       if(p.is_out) map[k].outs++;
-      if(p.on_base) map[k].hits++;
+      if(p.on_base&&p.outcome_id!=="walk") map[k].hits++;
       if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].ks++;
+      if(p.outcome_id==="walk"||p.outcome==="Walk") map[k].walks++;
+      if(isHard(p)) map[k].hard++;
+      if(isWeak(p)) map[k].weak++;
     });
     const order=["0-0","0-1","0-2","1-0","1-1","1-2","2-0","2-1","2-2","3-0","3-1","3-2"];
     return order.filter(k=>map[k]).map(k=>map[k]);
+  },[allLog]);
+
+  const matchupStats=useMemo(()=>{
+    const map={"R-R":{label:"R/R",n:0,outs:0,hits:0,ks:0,walks:0,hard:0,weak:0},
+               "R-L":{label:"R/L",n:0,outs:0,hits:0,ks:0,walks:0,hard:0,weak:0},
+               "L-R":{label:"L/R",n:0,outs:0,hits:0,ks:0,walks:0,hard:0,weak:0},
+               "L-L":{label:"L/L",n:0,outs:0,hits:0,ks:0,walks:0,hard:0,weak:0}};
+    allLog.forEach(p=>{
+      // We need pitcher hand -- stored on game level not pitch level
+      // Use batter_hand only for now, aggregate by batter hand
+      const bh=p.batter_hand||"R";
+      ["R","L"].forEach(ph=>{
+        // Can't determine pitcher hand from pitch_log alone; skip pitcher hand for now
+      });
+      // Aggregate by batter hand (R vs L)
+      const k=`?-${bh}`;
+    });
+    // Aggregate by batter hand since pitcher hand isn't in pitch_log
+    const bmap={"R":{label:"vs RHB",n:0,outs:0,hits:0,ks:0,walks:0,hard:0,weak:0},
+                "L":{label:"vs LHB",n:0,outs:0,hits:0,ks:0,walks:0,hard:0,weak:0}};
+    allLog.forEach(p=>{
+      const bh=p.batter_hand||"R";
+      const hand=bh==="L"?"L":"R";
+      bmap[hand].n++;
+      if(p.is_out) bmap[hand].outs++;
+      if(p.on_base&&p.outcome_id!=="walk") bmap[hand].hits++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") bmap[hand].ks++;
+      if(p.outcome_id==="walk"||p.outcome==="Walk") bmap[hand].walks++;
+      if(isHard(p)) bmap[hand].hard++;
+      if(isWeak(p)) bmap[hand].weak++;
+    });
+    return Object.values(bmap).filter(m=>m.n>0);
   },[allLog]);
 
   const zoneStats=useMemo(()=>{
     const map={};
     allLog.forEach(p=>{
       if(!p.zone) return;
-      if(!map[p.zone]) map[p.zone]={total:0,outs:0,hits:0};
-      map[p.zone].total++;
+      if(!map[p.zone]) map[p.zone]={n:0,outs:0,hits:0,hard:0,weak:0};
+      map[p.zone].n++;
       if(p.is_out) map[p.zone].outs++;
       if(p.on_base) map[p.zone].hits++;
+      if(isHard(p)) map[p.zone].hard++;
+      if(isWeak(p)) map[p.zone].weak++;
     });
     return map;
   },[allLog]);
 
-  const VIEWS=[{id:"pitcher",label:"Pitcher"},{id:"batter",label:"Batters"},{id:"count",label:"Counts"},{id:"zone",label:"Zones"}];
-  const pct=(n,d)=>d>0?Math.round((n/d)*100):0;
+  const VIEWS=[{id:"pitcher",label:"Pitcher"},{id:"batter",label:"Batters"},{id:"count",label:"Counts"},{id:"matchup",label:"Matchups"},{id:"zone",label:"Zones"}];
 
-  // Early returns AFTER all hooks
-  if(loading) return(
-    <div style={{padding:"16px"}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
-        <button onClick={onBack} style={{...S.ghostBtn,padding:"4px 10px",fontSize:11}}>← Back</button>
-      </div>
-      <div style={S.emptyState}>Loading stats...</div>
+  // Early returns after all hooks
+  if(loading) return(<div style={{padding:"16px"}}><button onClick={onBack} style={{...S.ghostBtn,padding:"4px 10px",marginBottom:16}}>← Back</button><div style={S.emptyState}>Loading...</div></div>);
+  if(allLog.length===0) return(<div style={{padding:"16px"}}><button onClick={onBack} style={{...S.ghostBtn,padding:"4px 10px",marginBottom:16}}>← Back</button><div style={S.emptyState}>No data yet. Save some games first.</div></div>);
+
+  const SORT_OPTS={
+    pitches:{label:"Pitches",fn:(a,b)=>b.n-a.n},
+    outs:{label:"Out%",fn:(a,b)=>pct(b.outs,b.n)-pct(a.outs,a.n)},
+    obp:{label:"OBP",fn:(a,b)=>pct(b.hits,b.n)-pct(a.hits,a.n)},
+    k:{label:"K%",fn:(a,b)=>pct(b.ks,b.n)-pct(a.ks,a.n)},
+    bb:{label:"BB%",fn:(a,b)=>pct(b.walks,b.n)-pct(a.walks,a.n)},
+    hard:{label:"Hard%",fn:(a,b)=>pct(b.hard,b.n)-pct(a.hard,a.n)},
+    weak:{label:"Weak%",fn:(a,b)=>pct(b.weak,b.n)-pct(a.weak,a.n)},
+  };
+
+  const statRow=(label,n,total,color)=>(
+    <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${C.border}`}}>
+      <span style={{fontSize:11,color:C.textSoft,fontWeight:600}}>{label}</span>
+      <span style={{fontSize:11,fontWeight:800,color:color||C.text}}>{pct(n,total)}% <span style={{color:C.textSoft,fontWeight:500}}>({n}/{total})</span></span>
     </div>
   );
-  if(allLog.length===0) return(
-    <div style={{padding:"16px"}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
-        <button onClick={onBack} style={{...S.ghostBtn,padding:"4px 10px",fontSize:11}}>← Back</button>
-      </div>
-      <div style={S.emptyState}>No data yet. Play and save some games first.</div>
+
+  const filteredPitchers=pitcherStats.filter(p=>p.name.toLowerCase().includes(search.toLowerCase())).sort(SORT_OPTS[sort]?.fn||(()=>0));
+  const filteredBatters=batterStats.filter(b=>b.name.toLowerCase().includes(search.toLowerCase())).sort(SORT_OPTS[sort]?.fn||(()=>0));
+
+  const sortBar=(
+    <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
+      {Object.entries(SORT_OPTS).map(([k,v])=>(
+        <button key={k} onClick={()=>setSort(k)} style={{
+          padding:"3px 8px",borderRadius:6,fontSize:10,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+          background:sort===k?C.green:C.surface,color:sort===k?"#fff":C.textMid,
+          border:`1px solid ${sort===k?C.green:C.border}`,cursor:"pointer",
+        }}>{v.label}</button>
+      ))}
     </div>
+  );
+
+  const searchBar=(
+    <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name..."
+      style={{...S.input,width:"100%",boxSizing:"border-box",marginBottom:8}}/>
   );
 
   return(
@@ -2202,140 +2273,210 @@ function StatsTab({user,onBack}){
         <button onClick={onBack} style={{...S.ghostBtn,padding:"4px 10px",fontSize:11}}>← Back</button>
         <div style={{fontSize:14,fontWeight:800,color:C.text}}>Stats</div>
       </div>
-      <div style={{display:"flex",borderBottom:`1.5px solid ${C.border}`,background:C.white}}>
+      <div style={{display:"flex",borderBottom:`1.5px solid ${C.border}`,background:C.white,overflowX:"auto"}}>
         {VIEWS.map(v=>(
-          <button key={v.id} onClick={()=>{setView(v.id);setSelected(null);}} style={{
-            flex:1,padding:"10px 4px",fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+          <button key={v.id} onClick={()=>{setView(v.id);setSelected(null);setSearch("");}} style={{
+            flex:"0 0 auto",padding:"10px 12px",fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
             background:"none",border:"none",borderBottom:`2px solid ${view===v.id?C.greenMid:"transparent"}`,
-            color:view===v.id?C.green:C.textSoft,cursor:"pointer",
+            color:view===v.id?C.green:C.textSoft,cursor:"pointer",whiteSpace:"nowrap",
           }}>{v.label}</button>
         ))}
       </div>
+
       <div style={{padding:"16px"}}>
 
+        {/* ── Pitcher ── */}
         {view==="pitcher"&&!selected&&(<>
-          <div style={S.sectionLabel}>Pitcher Stats ({pitcherStats.length})</div>
-          {pitcherStats.map(p=>(
+          {searchBar}{sortBar}
+          <div style={S.sectionLabel}>Pitchers ({filteredPitchers.length})</div>
+          {filteredPitchers.map(p=>(
             <div key={p.name} onClick={()=>setSelected(p)} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.text}}>{p.name}</div>
-                <div style={{fontSize:11,color:C.textSoft}}>{p.pitches} pitches</div>
+                <div style={{fontSize:11,color:C.textSoft}}>{p.n} pitches</div>
               </div>
-              <div style={{display:"flex",gap:12}}>
-                {[["K%",pct(p.ks,p.pitches)],["BB%",pct(p.walks,p.pitches)],["OBP",pct(p.hits,p.pitches)],["Out%",pct(p.outs,p.pitches)]].map(([lbl,val])=>(
+              <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4}}>
+                {[["Out%",pct(p.outs,p.n)],["K%",pct(p.ks,p.n)],["BB%",pct(p.walks,p.n)],["OBP",pct(p.hits,p.n)],["Hard%",pct(p.hard,p.n)],["Weak%",pct(p.weak,p.n)]].map(([lbl,val])=>(
                   <div key={lbl} style={{textAlign:"center"}}>
-                    <div style={{fontSize:14,fontWeight:800,color:C.green}}>{val}%</div>
-                    <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                    <div style={{fontSize:12,fontWeight:800,color:C.green}}>{val}%</div>
+                    <div style={{fontSize:8,color:C.textSoft,fontWeight:700}}>{lbl}</div>
                   </div>
                 ))}
               </div>
             </div>
           ))}
         </>)}
-
         {view==="pitcher"&&selected&&(<>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-            <button onClick={()=>setSelected(null)} style={{...S.ghostBtn,padding:"4px 10px"}}>← Back</button>
-            <div style={{fontSize:14,fontWeight:800,color:C.text}}>{selected.name}</div>
-          </div>
-          <div style={{display:"flex",gap:10,marginBottom:16}}>
-            {[["K%",pct(selected.ks,selected.pitches)],["BB%",pct(selected.walks,selected.pitches)],["OBP",pct(selected.hits,selected.pitches)],["Out%",pct(selected.outs,selected.pitches)]].map(([lbl,val])=>(
-              <div key={lbl} style={{flex:1,background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"10px",textAlign:"center"}}>
-                <div style={{fontSize:18,fontWeight:800,color:C.green}}>{val}%</div>
+          <button onClick={()=>setSelected(null)} style={{...S.ghostBtn,padding:"4px 10px",marginBottom:12}}>← Back</button>
+          <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>{selected.name}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
+            {[["Pitches",selected.n,null],["Out%",pct(selected.outs,selected.n),C.green],["OBP",pct(selected.hits,selected.n),C.warn],["K%",pct(selected.ks,selected.n),C.green],["BB%",pct(selected.walks,selected.n),C.warn],["Hard%",pct(selected.hard,selected.n),C.warn],["Weak%",pct(selected.weak,selected.n),C.green]].map(([lbl,val,col])=>(
+              <div key={lbl} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"10px",textAlign:"center"}}>
+                <div style={{fontSize:16,fontWeight:800,color:col||C.text}}>{typeof val==="number"&&lbl!=="Pitches"?`${val}%`:val}</div>
                 <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
               </div>
             ))}
           </div>
           <div style={S.sectionLabel}>Pitch Usage</div>
-          <div style={S.card}>
+          <div style={{...S.card,marginBottom:16}}>
             {Object.entries(selected.counts).sort((a,b)=>b[1]-a[1]).map(([type,count])=>(
-              <div key={type} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+              <div key={type} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
                 <span style={{flex:1,fontSize:12,fontWeight:700,color:C.text}}>{type}</span>
                 <span style={{fontSize:10,color:C.textSoft,width:28,textAlign:"right"}}>{count}x</span>
                 <div style={{width:50,height:5,background:C.surface,borderRadius:3,overflow:"hidden"}}>
-                  <div style={{width:`${pct(count,selected.pitches)}%`,height:"100%",background:C.green,borderRadius:3}}/>
+                  <div style={{width:`${pct(count,selected.n)}%`,height:"100%",background:C.green,borderRadius:3}}/>
                 </div>
-                <span style={{fontSize:11,fontWeight:700,color:C.textMid,width:32,textAlign:"right"}}>{pct(count,selected.pitches)}%</span>
+                <span style={{fontSize:11,fontWeight:700,color:C.textMid,width:32,textAlign:"right"}}>{pct(count,selected.n)}%</span>
+              </div>
+            ))}
+          </div>
+          <div style={S.sectionLabel}>By Batter Hand</div>
+          <div style={S.card}>
+            {Object.entries(selected.matchups).map(([hand,m])=>(
+              <div key={hand} style={{padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:12,fontWeight:800,color:C.text}}>vs {hand}HB</span>
+                  <span style={{fontSize:10,color:C.textSoft}}>{m.n} pitches</span>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2}}>
+                  {[["Out%",pct(m.outs,m.n)],["K%",pct(m.ks,m.n)],["BB%",pct(m.walks,m.n)],["OBP",pct(m.hits,m.n)],["K+W%",pct(m.ks+m.walks,m.n)]].map(([lbl,val])=>(
+                    <div key={lbl} style={{textAlign:"center"}}>
+                      <div style={{fontSize:11,fontWeight:800,color:C.green}}>{val}%</div>
+                      <div style={{fontSize:8,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
         </>)}
 
+        {/* ── Batters ── */}
         {view==="batter"&&!selected&&(<>
-          <div style={S.sectionLabel}>Batter Tendencies ({batterStats.length})</div>
-          {batterStats.map(b=>(
+          {searchBar}{sortBar}
+          <div style={S.sectionLabel}>Batters ({filteredBatters.length})</div>
+          {filteredBatters.map(b=>(
             <div key={b.name} onClick={()=>setSelected(b)} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.text}}>{b.name}</div>
-                <div style={{fontSize:11,color:C.textSoft}}>{b.pas} PA</div>
+                <div style={{fontSize:11,color:C.textSoft}}>{b.n} PA</div>
               </div>
-              <div style={{display:"flex",gap:12}}>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:14,fontWeight:800,color:b.hits/b.pas>0.35?C.warn:C.green}}>{pct(b.hits,b.pas)}%</div>
-                  <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>OBP</div>
-                </div>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:14,fontWeight:800,color:C.green}}>{pct(b.outs,b.pas)}%</div>
-                  <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>Out%</div>
-                </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4}}>
+                {[["Out%",pct(b.outs,b.n)],["K%",pct(b.ks,b.n)],["BB%",pct(b.walks,b.n)],["OBP",pct(b.hits,b.n)],["Hard%",pct(b.hard,b.n)],["Weak%",pct(b.weak,b.n)]].map(([lbl,val])=>(
+                  <div key={lbl} style={{textAlign:"center"}}>
+                    <div style={{fontSize:12,fontWeight:800,color:lbl==="OBP"||lbl==="Hard%"?C.warn:C.green}}>{val}%</div>
+                    <div style={{fontSize:8,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
         </>)}
-
         {view==="batter"&&selected&&(<>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-            <button onClick={()=>setSelected(null)} style={{...S.ghostBtn,padding:"4px 10px"}}>← Back</button>
-            <div style={{fontSize:14,fontWeight:800,color:C.text}}>{selected.name}</div>
+          <button onClick={()=>setSelected(null)} style={{...S.ghostBtn,padding:"4px 10px",marginBottom:12}}>← Back</button>
+          <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>{selected.name}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
+            {[["PA",selected.n,null],["Out%",pct(selected.outs,selected.n),C.green],["OBP",pct(selected.hits,selected.n),C.warn],["K%",pct(selected.ks,selected.n),C.green],["BB%",pct(selected.walks,selected.n),C.warn],["Hard%",pct(selected.hard,selected.n),C.warn],["Weak%",pct(selected.weak,selected.n),C.green]].map(([lbl,val,col])=>(
+              <div key={lbl} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"10px",textAlign:"center"}}>
+                <div style={{fontSize:16,fontWeight:800,color:col||C.text}}>{typeof val==="number"&&lbl!=="PA"?`${val}%`:val}</div>
+                <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+              </div>
+            ))}
           </div>
-          <div style={S.sectionLabel}>Pitch Results</div>
+          <div style={S.sectionLabel}>By Pitch Type</div>
           <div style={S.card}>
-            {Object.entries(selected.pr).sort((a,b)=>b[1].total-a[1].total).map(([type,res])=>(
-              <div key={type} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
-                <span style={{flex:1,fontSize:12,fontWeight:700,color:C.text}}>{type}</span>
-                <span style={{fontSize:10,color:C.textSoft,width:24,textAlign:"right"}}>{res.total}x</span>
-                <span style={{fontSize:10,fontWeight:700,color:C.green,width:48,textAlign:"right"}}>{pct(res.outs,res.total)}% out</span>
-                <span style={{fontSize:10,fontWeight:700,color:C.warn,width:44,textAlign:"right"}}>{pct(res.hits,res.total)}% hit</span>
+            {Object.entries(selected.pr).sort((a,b)=>b[1].n-a[1].n).map(([type,res])=>(
+              <div key={type} style={{padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                  <span style={{fontSize:12,fontWeight:700,color:C.text}}>{type}</span>
+                  <span style={{fontSize:10,color:C.textSoft}}>{res.n}x</span>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:2}}>
+                  {[["Out%",pct(res.outs,res.n)],["K%",pct(res.ks,res.n)],["OBP",pct(res.hits,res.n)],["Hard%",pct(res.hard,res.n)],["Weak%",pct(res.weak,res.n)]].map(([lbl,val])=>(
+                    <div key={lbl} style={{textAlign:"center"}}>
+                      <div style={{fontSize:11,fontWeight:800,color:lbl==="OBP"||lbl==="Hard%"?C.warn:C.green}}>{val}%</div>
+                      <div style={{fontSize:8,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
         </>)}
 
+        {/* ── Counts ── */}
         {view==="count"&&(<>
           <div style={S.sectionLabel}>By Count</div>
-          <div style={S.card}>
-            <div style={{display:"grid",gridTemplateColumns:"40px 1fr 1fr 1fr 1fr",gap:4,marginBottom:6}}>
-              {["Count","Pitches","Out%","K%","OBP"].map(h=>(
-                <span key={h} style={{fontSize:9,color:C.textSoft,fontWeight:700,textAlign:"right",textTransform:"uppercase"}}>{h}</span>
-              ))}
-            </div>
-            {countStats.map(c=>(
-              <div key={c.count} style={{display:"grid",gridTemplateColumns:"40px 1fr 1fr 1fr 1fr",gap:4,padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
-                <span style={{fontSize:13,fontWeight:800,color:C.text}}>{c.count}</span>
-                <span style={{fontSize:11,color:C.textSoft,textAlign:"right"}}>{c.total}</span>
-                <span style={{fontSize:11,fontWeight:700,color:C.green,textAlign:"right"}}>{pct(c.outs,c.total)}%</span>
-                <span style={{fontSize:11,fontWeight:700,color:C.green,textAlign:"right"}}>{pct(c.ks,c.total)}%</span>
-                <span style={{fontSize:11,fontWeight:700,color:c.hits/c.total>0.35?C.warn:C.textMid,textAlign:"right"}}>{pct(c.hits,c.total)}%</span>
-              </div>
-            ))}
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:"'Nunito',sans-serif"}}>
+              <thead>
+                <tr style={{background:C.surface}}>
+                  {["Count","N","Out%","K%","BB%","OBP","Hard%","Weak%"].map(h=>(
+                    <th key={h} style={{padding:"6px 4px",textAlign:"right",fontWeight:700,color:C.textSoft,fontSize:9,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {countStats.map((c,i)=>(
+                  <tr key={c.count} style={{background:i%2===0?C.white:C.surface}}>
+                    <td style={{padding:"7px 4px",fontWeight:800,color:C.text,textAlign:"left"}}>{c.count}</td>
+                    <td style={{padding:"7px 4px",color:C.textSoft,textAlign:"right"}}>{c.n}</td>
+                    <td style={{padding:"7px 4px",fontWeight:700,color:C.green,textAlign:"right"}}>{pct(c.outs,c.n)}%</td>
+                    <td style={{padding:"7px 4px",fontWeight:700,color:C.green,textAlign:"right"}}>{pct(c.ks,c.n)}%</td>
+                    <td style={{padding:"7px 4px",fontWeight:700,color:C.warn,textAlign:"right"}}>{pct(c.walks,c.n)}%</td>
+                    <td style={{padding:"7px 4px",fontWeight:700,color:c.hits/c.n>0.3?C.warn:C.textMid,textAlign:"right"}}>{pct(c.hits,c.n)}%</td>
+                    <td style={{padding:"7px 4px",fontWeight:700,color:c.hard/c.n>0.3?C.warn:C.textMid,textAlign:"right"}}>{pct(c.hard,c.n)}%</td>
+                    <td style={{padding:"7px 4px",fontWeight:700,color:C.textMid,textAlign:"right"}}>{pct(c.weak,c.n)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>)}
 
+        {/* ── Matchups ── */}
+        {view==="matchup"&&(<>
+          <div style={S.sectionLabel}>By Batter Handedness</div>
+          {matchupStats.map(m=>(
+            <div key={m.label} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.text}}>{m.label}</div>
+                <div style={{fontSize:11,color:C.textSoft}}>{m.n} pitches</div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                {[["Out%",pct(m.outs,m.n),C.green],["K%",pct(m.ks,m.n),C.green],["BB%",pct(m.walks,m.n),C.warn],["OBP",pct(m.hits,m.n),C.warn],["Hard%",pct(m.hard,m.n),C.warn],["Weak%",pct(m.weak,m.n),C.green]].map(([lbl,val,col])=>(
+                  <div key={lbl} style={{background:C.surface,borderRadius:8,padding:"8px",textAlign:"center"}}>
+                    <div style={{fontSize:15,fontWeight:800,color:col}}>{val}%</div>
+                    <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div style={{fontSize:10,color:C.textSoft,marginTop:8,fontWeight:500}}>
+            Note: pitcher handedness is not stored per-pitch. Full R/R, R/L etc. breakdowns will appear in a future update once pitcher hand is saved to the pitch log.
+          </div>
+        </>)}
+
+        {/* ── Zones ── */}
         {view==="zone"&&(<>
-          <div style={S.sectionLabel}>Zone Effectiveness (darker = more outs)</div>
+          <div style={S.sectionLabel}>Zone Effectiveness</div>
           <div style={S.card}>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3}}>
               {Array.from({length:25},(_,idx)=>{
                 const row=Math.floor(idx/5),col=idx%5,id=`${row}-${col}`;
                 const z=zoneStats[id],inZ=row>=1&&row<=3&&col>=1&&col<=3;
-                const outPct=z?pct(z.outs,z.total):0;
+                const outPct=z?pct(z.outs,z.n):0;
+                const hitPct=z?pct(z.hits,z.n):0;
                 const intensity=outPct/100;
-                return(<div key={id} style={{height:46,borderRadius:5,
+                return(<div key={id} style={{
+                  height:46,borderRadius:5,
                   background:z?`rgba(45,106,79,${0.1+intensity*0.85})`:inZ?C.white:C.surface,
-                  border:`1.5px solid ${C.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                  border:`1.5px solid ${C.border}`,display:"flex",flexDirection:"column",
+                  alignItems:"center",justifyContent:"center"}}>
                   {z&&<>
                     <span style={{color:intensity>0.5?"#fff":C.green,fontSize:11,fontWeight:800}}>{outPct}%</span>
-                    <span style={{color:intensity>0.5?"rgba(255,255,255,0.7)":C.textSoft,fontSize:8}}>{z.total}p</span>
+                    <span style={{color:intensity>0.5?"rgba(255,255,255,0.7)":C.textSoft,fontSize:8}}>{z.n}p</span>
                   </>}
                 </div>);
               })}
@@ -2347,6 +2488,7 @@ function StatsTab({user,onBack}){
     </div>
   );
 }
+
 
 function HistoryTab({user}){
   const [games,setGames]=useState([]);
