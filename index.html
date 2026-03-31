@@ -623,6 +623,79 @@ const PITCH_TYPES=["4-Seam FB","2-Seam FB","Cutter","Sinker","Slider","Sweeper",
 const BAT_OPTS=[{val:"R",label:"RHB"},{val:"L",label:"LHB"},{val:"S",label:"Switch"}];
 
 // ─── Zone Grid ────────────────────────────────────────────────────────────────
+function ZoneGridWithTrail({onSelect,selected,recommended,pitchType,pitcherHand,batterHand,velo}){
+  const zones=[];
+  for(let r=0;r<5;r++) for(let c=0;c<5;c++) zones.push({id:`${r}-${c}`,inZone:r>=1&&r<=3&&c>=1&&c<=3});
+
+  // Compute pitch break trail for the selected/active pitch
+  // Trail: starting point = approximate release angle, ending = where ball ends up
+  // We show an arrow overlay on the grid SVG
+  const trailSvg=useMemo(()=>{
+    if(!pitchType||!pitcherHand) return null;
+    const mv=getMovement(pitchType,velo||90,pitcherHand);
+    // Grid is ~5 cols x 5 rows. Map movement to grid coordinates
+    // h: positive = arm side. From catcher view: RHP arm side = right (col 4), LHP arm side = left (col 0)
+    // For RHP: positive h moves right (+col), negative h moves left (-col)
+    // For LHP: movement is already flipped by getMovement
+    // Grid cell size ~20% each. Center of grid = col 2, row 2
+    // Scale: 20in movement ~ 1 cell width
+    const hCells = mv.h / 10; // cells of horizontal movement
+    const vCells = -mv.v / 10; // cells of vertical (negative = upward on grid)
+
+    // Start = center-top of grid (release point approximation)
+    // End = where ball ends up relative to center
+    const startX = 50; // percent
+    const startY = 5;  // top
+    const endX = Math.min(95,Math.max(5, 50 + hCells * 20));
+    const endY = Math.min(95,Math.max(5, 50 + vCells * 20));
+
+    return {startX,startY,endX,endY,color:PITCH_PROFILES[pitchType]?.type==="fastball"?"#e74c3c":PITCH_PROFILES[pitchType]?.type==="breaking"?"#2980b9":"#27ae60"};
+  },[pitchType,pitcherHand,velo]);
+
+  return(
+    <div style={{position:"relative"}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3}}>
+        {zones.map(z=>{
+          const isSel=z.id===selected,isRec=z.id===recommended;
+          return(
+            <div key={z.id} onClick={()=>onSelect(z.id)} style={{
+              borderRadius:6,minHeight:44,cursor:"pointer",transition:"all 0.1s",
+              background:isSel?C.green:isRec?C.blueLight:z.inZone?C.white:C.surface,
+              border:`1.5px solid ${isSel?C.green:isRec?C.blue:C.border}`,
+              boxShadow:isSel?`0 0 0 3px ${C.greenLight}`:isRec?`0 0 0 2px ${C.blueLight}`:"none",
+              display:"flex",alignItems:"center",justifyContent:"center",
+            }}>
+              {isRec&&!isSel&&<span style={{fontSize:18}}>🔵</span>}
+              {isSel&&<span style={{fontSize:18}}>🟢</span>}
+            </div>
+          );
+        })}
+      </div>
+      {/* Pitch break trail overlay */}
+      {trailSvg&&(
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none"
+          style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",pointerEvents:"none",opacity:0.65}}>
+          <defs>
+            <marker id="arrowhead" markerWidth="5" markerHeight="4" refX="5" refY="2" orient="auto">
+              <polygon points="0 0, 5 2, 0 4" fill={trailSvg.color}/>
+            </marker>
+          </defs>
+          {/* Dashed trail line */}
+          <line
+            x1={trailSvg.startX} y1={trailSvg.startY}
+            x2={trailSvg.endX} y2={trailSvg.endY}
+            stroke={trailSvg.color} strokeWidth="2.5"
+            strokeDasharray="4,2"
+            markerEnd="url(#arrowhead)"
+          />
+          {/* Release point dot */}
+          <circle cx={trailSvg.startX} cy={trailSvg.startY} r="2.5" fill={trailSvg.color}/>
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function ZoneGrid({onSelect,selected,recommended}){
   const zones=[];
   for(let r=0;r<5;r++) for(let c=0;c<5;c++) zones.push({id:`${r}-${c}`,inZone:r>=1&&r<=3&&c>=1&&c<=3});
