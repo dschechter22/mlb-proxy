@@ -56,6 +56,8 @@ async function saveGame(session,user){
         is_out:e.isOut||false,on_base:e.onBase||false,
         inning:e.inning||1,balls:e.balls||0,strikes:e.strikes||0,
         username:user?.username||"anon",
+        contact_class:e.contactClass||null,
+        hit_result:e.hitResult||null,
       }));
       const{error:pe}=await sb.from("pitch_log").insert(rows);
       if(pe) console.error("Save pitches error:",pe);
@@ -315,17 +317,21 @@ async function searchBatters(query) {
   const data = await mlbFetch(`/apis/listings.json?type=mlb_card&name=${encodeURIComponent(query)}`);
   if (!data) return [];
   const pitcherPositions = new Set(["SP","RP","CL","MR"]);
-  return (data.listings || [])
-    .map(l => l.item || l)
+  const stubs = (data.listings || []).map(l => l.item || l);
+  console.log("searchBatters stubs:", stubs.slice(0,5).map(c=>({
+    name:c.name, ovr:c.ovr, is_hitter:c.is_hitter,
+    bat_hand:c.bat_hand, display_position:c.display_position,
+    two_way:c.two_way,
+  })));
+  return stubs
     .filter(c => {
       // Always include confirmed hitters
       if (c.is_hitter === true || c.is_hitter === 1) return true;
-      // Include anyone with a bat_hand set (catches two-way players like Ohtani)
+      // Include anyone with a valid bat_hand (two-way players)
       if (c.bat_hand && ["R","L","S"].includes(c.bat_hand)) return true;
-      // Exclude confirmed non-hitters in pitcher positions
-      if (pitcherPositions.has(c.display_position)) return false;
-      // Exclude explicit non-hitters with no bat_hand
-      if (c.is_hitter === false || c.is_hitter === 0) return false;
+      // Exclude ONLY if both a pitcher position AND explicitly not a hitter
+      if (pitcherPositions.has(c.display_position) && (c.is_hitter === false || c.is_hitter === 0)) return false;
+      // Include everything else -- let the user decide
       return true;
     })
     .map(c => ({
