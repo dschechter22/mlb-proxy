@@ -813,6 +813,9 @@ function GameTypeScreen({onSelect}) {
           <div style={{fontSize:36,marginBottom:8}}>⚾</div>
           <div style={{fontSize:22,fontWeight:800,color:C.green}}>New Game</div>
           <div style={{fontSize:13,color:C.textSoft,marginTop:4,fontWeight:500}}>Select game mode</div>
+          <div style={{fontSize:10,color:C.textSoft,marginTop:8,fontWeight:500,lineHeight:1.5}}>
+            Maddux.io tracks every pitch you throw and recommends what to throw next based on tunneling, count, and batter tendencies. Tap ? in the header anytime for full instructions.
+          </div>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           {TYPES.map(t=>(
@@ -2895,6 +2898,284 @@ function StatsTab({user,onBack}){
 }
 
 
+const ADMIN_USERNAME = "dannyadminSDS09";
+
+const INSTRUCTIONS = [
+  {
+    title:"What is Maddux.io?",
+    body:"Maddux.io is a real-time pitch sequencing companion for MLB The Show. It uses your pitcher's arsenal and the game situation to recommend what to throw next, where to throw it, and why, so you can pitch like a chess player, not just a button masher.",
+  },
+  {
+    title:"Getting Started",
+    body:null,
+    steps:["Select a game mode (Ranked, Battle Royale, or Event)","Search your pitcher by name in the DD card search","Build the opposing lineup or use Auto-Fill","Tap Start Game"],
+  },
+  {
+    title:"During the Game",
+    bullets:["The app recommends a pitch and location based on tunneling, count leverage, pitch sequencing, and batter tendencies","Tap your zone to log where you threw it, then record the outcome","Balls, strikes, fouls, and contact are all tracked","Base runners update automatically on hits, walks, and outs"],
+  },
+  {
+    title:"Reading the Recommendation",
+    bullets:["The score (0-100) reflects how strongly the pitch is recommended given the current situation","The explanation tells you why; tunneling off the last pitch, breaking away from the hitter, changing velocity, etc.","The blue dot on the zone grid shows the suggested location","The mini plot on each pitch button shows its break direction"],
+  },
+  {
+    title:"The Model Gets Smarter Over Time",
+    body:"Maddux.io is not static. Every pitch outcome you log feeds back into the recommendation engine. Pitches that generate strikeouts and weak contact get prioritized; pitches that get squared up get suppressed. The more you play, the more the model reflects what actually works in MLB The Show, not just baseball theory. Over time, your Stats tab becomes a personal scouting report that makes every future game sharper.",
+  },
+  {
+    title:"Tips",
+    bullets:["The app learns within a game; outcomes update recommendations in real time as the at-bat develops","Check the Lineup tab mid-game to see zone charts for each batter you have faced","Save your game after finishing to build your Stats history","Stats track your effectiveness by pitch, count, zone, and batter over time","The community database pools outcomes across all users; the more people play, the smarter everyone's recommendations get"],
+  },
+  {
+    title:"Beta Notice",
+    body:"This is the first public release of Maddux.io. You may encounter bugs. If you run into anything, please report it to madduxiobaseball@gmail.com and it will be addressed as soon as possible. Thank you for helping make the app better.",
+    highlight:true,
+  },
+];
+
+function InstructionsModal({onClose}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"16px",overflowY:"auto"}}>
+      <div style={{background:C.white,borderRadius:14,width:"100%",maxWidth:460,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 32px rgba(0,0,0,0.25)"}}>
+        <div style={{position:"sticky",top:0,background:C.white,borderBottom:`1.5px solid ${C.border}`,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"14px 14px 0 0"}}>
+          <div style={{fontSize:16,fontWeight:800,color:C.text}}>How to Use Maddux.io</div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textSoft,fontFamily:"'Neuton','Nunito',serif",lineHeight:1}}>✕</button>
+        </div>
+        <div style={{padding:"16px"}}>
+          {INSTRUCTIONS.map((s,i)=>(
+            <div key={i} style={{marginBottom:18,padding:s.highlight?"12px":"0",background:s.highlight?C.goldLight:"none",borderRadius:s.highlight?8:0,border:s.highlight?`1px solid ${C.gold}`:"none"}}>
+              <div style={{fontSize:13,fontWeight:800,color:s.highlight?C.gold:C.green,marginBottom:6}}>{s.title}</div>
+              {s.body&&<div style={{fontSize:12,color:C.textMid,lineHeight:1.6,fontWeight:500}}>{s.body}</div>}
+              {s.steps&&<ol style={{margin:"0 0 0 18px",padding:0}}>{s.steps.map((st,j)=><li key={j} style={{fontSize:12,color:C.textMid,lineHeight:1.7,fontWeight:500}}>{st}</li>)}</ol>}
+              {s.bullets&&<ul style={{margin:"0 0 0 14px",padding:0}}>{s.bullets.map((b,j)=><li key={j} style={{fontSize:12,color:C.textMid,lineHeight:1.65,fontWeight:500,marginBottom:2}}>{b}</li>)}</ul>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AboutTab(){
+  return(
+    <div style={{padding:"20px 16px"}}>
+      <div style={{fontSize:18,fontWeight:800,color:C.green,marginBottom:4}}>About Maddux.io</div>
+      <div style={{fontSize:11,color:C.textSoft,marginBottom:20,fontWeight:500}}>Built by a stats nerd, for stats nerds.</div>
+
+      {[
+        {
+          title:"Why I Built This",
+          body:"I have been playing MLB The Show competitively for years, and the higher you climb in Ranked Seasons, the more you realize that raw card ratings only get you so far. At some point, pitching becomes chess. You need to understand sequencing, tunneling, count leverage, and batter tendencies, and most importantly you need to remember all of it in real time while your opponent is in the box.\n\nI am a stats nerd at heart. I spent years consuming baseball analytics, sabermetrics, and scouting reports, fascinated by how real pitchers and catchers build a game plan and execute it pitch by pitch. I always wanted that same level of insight in The Show, a way to track what actually works against specific batters, build a real scouting report over time, and let the data tell me what to throw next instead of guessing.\n\nThat is what Maddux.io is. I built it for myself first, because I was tired of losing to hitters I had no read on. Now I am sharing it because I think anyone who takes the competitive side of The Show seriously can benefit from the same edge.",
+        },
+        {
+          title:"Your Data",
+          body:"Maddux.io only collects what you put into it, nothing more. We do not track your device, your account, or anything outside of the pitch outcomes and game results you manually log. That data is used for one purpose only: to power your personal stats and improve the recommendation engine for everyone. It will never be sold, shared with third parties, or used for anything outside of making you a better pitcher in MLB The Show.",
+        },
+        {
+          title:"Beta Notice",
+          body:"This is the first public release of Maddux.io. You may encounter bugs. If you run into anything, please report it to madduxiobaseball@gmail.com and it will be addressed as soon as possible. Thank you for helping make the app better.",
+          highlight:true,
+        },
+      ].map((s,i)=>(
+        <div key={i} style={{marginBottom:20,padding:s.highlight?"14px 16px":"0",background:s.highlight?C.goldLight:"none",borderRadius:s.highlight?10:0,border:s.highlight?`1.5px solid ${C.gold}`:"none"}}>
+          <div style={{fontSize:13,fontWeight:800,color:s.highlight?C.gold:C.green,marginBottom:8}}>{s.title}</div>
+          {s.body.split("\n\n").map((p,j)=>(
+            <div key={j} style={{fontSize:12,color:C.textMid,lineHeight:1.7,fontWeight:500,marginBottom:j<s.body.split("\n\n").length-1?10:0}}>{p}</div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+async function loadCommunityStats(){
+  // Query pitch_log without username filter for community aggregate
+  const{data,error}=await sb.from("pitch_log").select("pitch_type,outcome_id,is_out,on_base,batter_name,pitcher_name,contact_class,hit_result,zone,balls,strikes").limit(10000);
+  if(error){console.error("loadCommunityStats:",error);return[];}
+  return data||[];
+}
+
+async function loadAdminStats(){
+  // Total games and pitches across all users
+  const[games,pitches]=await Promise.all([
+    sb.from("games").select("id,username,total_pitches,my_score,opp_score,created_at"),
+    sb.from("pitch_log").select("id,pitch_type,outcome_id,is_out,on_base,batter_name,pitcher_name,contact_class,zone").limit(50000),
+  ]);
+  return{games:games.data||[],pitches:pitches.data||[]};
+}
+
+function CommunityTab({user}){
+  const isAdmin=user?.username===ADMIN_USERNAME.toLowerCase();
+  const[log,setLog]=useState([]);
+  const[adminData,setAdminData]=useState(null);
+  const[loading,setLoading]=useState(true);
+  const[view,setView]=useState("pitches");
+
+  useEffect(()=>{
+    if(isAdmin){
+      loadAdminStats().then(d=>{setAdminData(d);setLoading(false);});
+    } else {
+      loadCommunityStats().then(d=>{setLog(d);setLoading(false);});
+    }
+  },[]);
+
+  const pct=(n,d)=>d>0?Math.round((n/d)*100):0;
+
+  // Community aggregates from pitch_log (no username)
+  const pitchAgg=useMemo(()=>{
+    const src=isAdmin?(adminData?.pitches||[]):log;
+    const map={};
+    src.forEach(p=>{
+      const k=p.pitch_type||"Unknown";
+      if(!map[k]) map[k]={type:k,n:0,outs:0,hits:0,ks:0};
+      map[k].n++;
+      if(p.is_out) map[k].outs++;
+      if(p.on_base) map[k].hits++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].ks++;
+    });
+    return Object.values(map).sort((a,b)=>b.n-a.n);
+  },[log,adminData]);
+
+  const batterAgg=useMemo(()=>{
+    const src=isAdmin?(adminData?.pitches||[]):log;
+    const map={};
+    src.forEach(p=>{
+      const k=p.batter_name||"";if(!k.trim()) return;
+      if(!map[k]) map[k]={name:k,n:0,outs:0,hits:0};
+      map[k].n++;
+      if(p.is_out) map[k].outs++;
+      if(p.on_base) map[k].hits++;
+    });
+    return Object.values(map).sort((a,b)=>b.n-a.n).slice(0,20);
+  },[log,adminData]);
+
+  const pitcherAgg=useMemo(()=>{
+    const src=isAdmin?(adminData?.pitches||[]):log;
+    const map={};
+    src.forEach(p=>{
+      const k=p.pitcher_name||"Unknown";
+      if(!map[k]) map[k]={name:k,n:0,outs:0,ks:0};
+      map[k].n++;
+      if(p.is_out) map[k].outs++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].ks++;
+    });
+    return Object.values(map).sort((a,b)=>b.n-a.n).slice(0,20);
+  },[log,adminData]);
+
+  if(loading) return <div style={S.emptyState}>Loading community data...</div>;
+
+  const totalPitches=isAdmin?(adminData?.pitches?.length||0):log.length;
+  const totalGames=isAdmin?(adminData?.games?.length||0):0;
+  const totalUsers=isAdmin?new Set(adminData?.games?.map(g=>g.username)||[]).size:0;
+
+  const VIEWS=[{id:"pitches",label:"Pitches"},{id:"batters",label:"Batters"},{id:"pitchers",label:"Pitchers"}];
+
+  return(
+    <div style={{padding:"0"}}>
+      {/* Header */}
+      <div style={{padding:"14px 16px",background:C.greenDim,borderBottom:`1.5px solid ${C.greenMid}`}}>
+        <div style={{fontSize:14,fontWeight:800,color:C.green,marginBottom:4}}>
+          {isAdmin?"Admin View: All Users":"Community Data"}
+        </div>
+        <div style={{fontSize:11,color:C.textMid,fontWeight:500}}>
+          {isAdmin
+            ?`${totalUsers} users · ${totalGames} games · ${totalPitches.toLocaleString()} pitches logged`
+            :`${totalPitches.toLocaleString()} pitches pooled across all users`}
+        </div>
+        {!isAdmin&&<div style={{fontSize:10,color:C.textSoft,marginTop:4,fontWeight:500}}>Outcomes are anonymous. No usernames are shared.</div>}
+      </div>
+
+      {/* Sub-tabs */}
+      <div style={{display:"flex",borderBottom:`1.5px solid ${C.border}`,background:C.white}}>
+        {VIEWS.map(v=>(
+          <button key={v.id} onClick={()=>setView(v.id)} style={{
+            flex:1,padding:"10px 4px",fontSize:11,fontWeight:700,fontFamily:"'Neuton','Nunito',serif",
+            background:"none",border:"none",borderBottom:`2px solid ${view===v.id?C.greenMid:"transparent"}`,
+            color:view===v.id?C.green:C.textSoft,cursor:"pointer",
+          }}>{v.label}</button>
+        ))}
+      </div>
+
+      <div style={{padding:"16px"}}>
+
+        {view==="pitches"&&(<>
+          <div style={S.sectionLabel}>Best Pitches (by K%)</div>
+          {pitchAgg.map(p=>(
+            <div key={p.type} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:9,padding:"10px 14px",marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.text}}>{p.type}</div>
+                <div style={{fontSize:11,color:C.textSoft}}>{p.n.toLocaleString()} thrown</div>
+              </div>
+              <div style={{display:"flex",gap:16}}>
+                {[["K%",pct(p.ks,p.n)],["Out%",pct(p.outs,p.n)],["OBP",pct(p.hits,p.n)]].map(([lbl,val])=>(
+                  <div key={lbl} style={{textAlign:"center"}}>
+                    <div style={{fontSize:14,fontWeight:800,color:lbl==="OBP"?C.warn:C.green}}>{val}%</div>
+                    <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>)}
+
+        {view==="batters"&&(<>
+          <div style={S.sectionLabel}>Most Faced Batters</div>
+          {batterAgg.map(b=>(
+            <div key={b.name} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:9,padding:"10px 14px",marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.text}}>{b.name}</div>
+                <div style={{fontSize:11,color:C.textSoft}}>{b.n} PA</div>
+              </div>
+              <div style={{display:"flex",gap:16,marginTop:4}}>
+                {[["Out%",pct(b.outs,b.n)],["OBP",pct(b.hits,b.n)]].map(([lbl,val])=>(
+                  <div key={lbl} style={{textAlign:"center"}}>
+                    <div style={{fontSize:14,fontWeight:800,color:lbl==="OBP"?C.warn:C.green}}>{val}%</div>
+                    <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>)}
+
+        {view==="pitchers"&&(<>
+          <div style={S.sectionLabel}>Top Pitchers (by K%)</div>
+          {pitcherAgg.map(p=>(
+            <div key={p.name} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:9,padding:"10px 14px",marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.text}}>{p.name}</div>
+                <div style={{fontSize:11,color:C.textSoft}}>{p.n} pitches</div>
+              </div>
+              <div style={{display:"flex",gap:16,marginTop:4}}>
+                {[["K%",pct(p.ks,p.n)],["Out%",pct(p.outs,p.n)]].map(([lbl,val])=>(
+                  <div key={lbl} style={{textAlign:"center"}}>
+                    <div style={{fontSize:14,fontWeight:800,color:C.green}}>{val}%</div>
+                    <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {isAdmin&&(<>
+            <div style={{...S.sectionLabel,marginTop:16}}>Admin: User Breakdown</div>
+            {[...new Set(adminData?.games?.map(g=>g.username)||[])].map(u=>{
+              const uGames=adminData.games.filter(g=>g.username===u);
+              return(
+                <div key={u} style={{background:C.surface,borderRadius:8,padding:"8px 12px",marginBottom:4,display:"flex",justifyContent:"space-between"}}>
+                  <span style={{fontSize:12,fontWeight:700,color:C.text}}>{u}</span>
+                  <span style={{fontSize:11,color:C.textSoft}}>{uGames.length} games</span>
+                </div>
+              );
+            })}
+          </>)}
+        </>)}
+
+      </div>
+    </div>
+  );
+}
+
+
 function SettingsTab({paletteKey,onPaletteChange}){
   return(
     <div style={{padding:"16px"}}>
@@ -3017,6 +3298,7 @@ function HistoryTab({user}){
 
 function App(){
   const [tab,setTab]=useState("setup");
+  const [showInstructions,setShowInstructions]=useState(false);
   const [session,setSession]=useState(null);
   const [paletteKey,setPaletteKey]=useState(()=>localStorage.getItem('maddux_palette')||'green');
   const handlePaletteChange=(key)=>{setPalette(key);setPaletteKey(key);};
@@ -3125,7 +3407,7 @@ function App(){
   },[session,user]);
 
   const ordinal=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);};
-  const TABS_NO_GAME=[{id:"setup",label:"Setup"},{id:"history",label:"History"},{id:"settings",label:"⚙"}];
+  const TABS_NO_GAME=[{id:"setup",label:"Setup"},{id:"history",label:"History"},{id:"community",label:"Global"},{id:"about",label:"About"},{id:"settings",label:"⚙"}];
   const TABS_IN_GAME=[{id:"atbat",label:"At-Bat"},{id:"lineup",label:"Lineup"},{id:"log",label:"Log"},{id:"history",label:"History"}];
   const TABS=session?TABS_IN_GAME:TABS_NO_GAME;
 
@@ -3166,6 +3448,7 @@ function App(){
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.9)"}}>{user.username}</div>
               <button onClick={handleLogout} style={{fontSize:9,color:"rgba(255,255,255,0.5)",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",padding:0,fontWeight:600}}>sign out</button>
+              <button onClick={()=>setShowInstructions(true)} style={{fontSize:11,color:"rgba(255,255,255,0.7)",background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",borderRadius:"50%",width:22,height:22,cursor:"pointer",fontFamily:"inherit",fontWeight:800,lineHeight:"20px",textAlign:"center",padding:0}}>?</button>
             </div>
           </div>
         </div>
@@ -3240,8 +3523,11 @@ function App(){
         )}
         {tab==="stats"&&<StatsErrorBoundary onBack={()=>setTab(session?"atbat":"setup")}><StatsTab user={user} onBack={()=>setTab(session?"atbat":"setup")}/></StatsErrorBoundary>}
         {tab==="history"&&<HistoryTab user={user}/>}
+        {tab==="community"&&<CommunityTab user={user}/>}
+        {tab==="about"&&<AboutTab/>}
         {tab==="settings"&&<SettingsTab paletteKey={paletteKey} onPaletteChange={handlePaletteChange}/>}
       </div>
+      {showInstructions&&<InstructionsModal onClose={()=>setShowInstructions(false)}/>}
     </div>
   );
 }
