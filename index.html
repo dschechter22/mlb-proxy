@@ -22,7 +22,7 @@
 <script type="text/babel" data-presets="react" data-plugins="transform-modules-umd">
 const { useState, useCallback, useMemo, useEffect } = React;
 
-const sb = supabase.createClient("https://giqhacohjkuskljpqzsd.supabase.co", "sb_publishable_uABrRkYvlops5IXCIR3tmA_ey5eCSWn");
+const sb = supabase.createClient("https://giqhacohjkuskljpqzsd.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpcWhhY29oamt1c2tsanBxenNkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4OTIwODEsImV4cCI6MjA5MDQ2ODA4MX0.fupYDfOWzm9NOere19vO2gboB8KE5f6hFZBC6BBTaWw");
 
 const USER_KEY = "pitchiq_user";
 function hashPin(pin){let h=0;for(let i=0;i<pin.length;i++){h=((h<<5)-h)+pin.charCodeAt(i);h|=0;}return Math.abs(h).toString(36);}
@@ -318,12 +318,15 @@ async function searchBatters(query) {
   return (data.listings || [])
     .map(l => l.item || l)
     .filter(c => {
+      // Always include confirmed hitters
       if (c.is_hitter === true || c.is_hitter === 1) return true;
-      // Two-way players: is_hitter may be false but they have batting stats
-      // Check if card has batting attributes (power/contact ratings)
-      if ((c.power_left || c.power_right || c.contact_left || c.contact_right) && c.bat_hand) return true;
+      // Include anyone with a bat_hand set (catches two-way players like Ohtani)
+      if (c.bat_hand && ["R","L","S"].includes(c.bat_hand)) return true;
+      // Exclude confirmed non-hitters in pitcher positions
+      if (pitcherPositions.has(c.display_position)) return false;
+      // Exclude explicit non-hitters with no bat_hand
       if (c.is_hitter === false || c.is_hitter === 0) return false;
-      return !pitcherPositions.has(c.display_position);
+      return true;
     })
     .map(c => ({
       name: c.name,
@@ -441,15 +444,14 @@ const COUNT_LEVERAGE = {
 // LHP vs LHH: slider breaks away (col 0-1), LHP vs RHH: slider breaks inside (col 3-4)
 function getRecZone(pitchType, pitcherHand, batterHand){
   const sameHand = pitcherHand === batterHand;
-  // Catcher's view: RHB stands LEFT. Col 0=left/inside-to-RHH, col 4=right/away-from-RHH
-  // RHP vs RHH (sameHand): slider/sweeper/changeup break AWAY = right side = col 3-4
-  // RHP vs LHH (diffHand): slider breaks TOWARD LHH = right side = col 3-4 (same physical side)
-  // Key: "away" for breaking pitches = col 3 (outer third right), "inside" = col 1 (inner third left)
-  const awayLow  = sameHand ? "3-3" : "3-1";  // away = right for sameHand (RHP vs RHH)
-  const awayMid  = sameHand ? "2-3" : "2-1";
-  const insideLow= sameHand ? "3-1" : "3-3";  // inside = left for sameHand
+  // Catcher's view: RHB on LEFT. Col 0=inside-to-RHH, col 4=away-from-RHH
+  const awayLow  = sameHand ? "3-3" : "3-1";
+  const insideLow= sameHand ? "3-1" : "3-3";
+  // 4-seam FB: high corner, never middle -- alternate inside/away by batter index
+  // Using sameHand to pick: high-inside for sameHand, high-away for opp
+  const fbHigh   = sameHand ? "1-1" : "1-3";
   switch(pitchType){
-    case "4-Seam FB": return "1-2";
+    case "4-Seam FB": return fbHigh;
     case "2-Seam FB": return insideLow;
     case "Cutter":    return awayLow;
     case "Sinker":    return insideLow;
@@ -459,8 +461,8 @@ function getRecZone(pitchType, pitcherHand, batterHand){
     case "12-6 Curve":return "4-2";
     case "Changeup":  return awayLow;
     case "Splitter":  return "4-2";
-    case "Knuckleball":return "2-2";
-    default:          return "2-2";
+    case "Knuckleball":return "2-3";
+    default:          return "1-3";
   }
 }
 function getChaseZone(pitchType, pitcherHand, batterHand){
@@ -537,6 +539,13 @@ function gameZoneBonus(pitchType,zoneId,pitcherHand,batterHand){
   const isWayInside=c===0; const isWayAway=c===4;
 
   let bonus=0;
+
+  // Universal: middle-middle is never good -- hard penalty for all pitch types
+  if(r===2&&c===2) bonus-=40;
+  // High middle and low middle: heavy penalty
+  if(c===2&&inZone&&r!==2) bonus-=20;
+  // Middle row middle column band: general suppression
+  if(c===2&&!inZone) bonus-=10;
 
   if(isFast){
     // High in zone: always good
@@ -1251,10 +1260,21 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       const samePitchZone2=pitchZoneCapped(p.type,recZ);
 
       // Factor 1: Tunnel score (0-100 scale)
-      // First pitch: use a small seeded variation so all pitches get a fair shake
-      let tunnelFactor=lastThrown
-        ?tunnelScore(lastThrown,p.type,pitches.find(x=>x.type===lastThrown)?.velo||90,p.velo,pitcherHand)
-        :55+(batterIdx*7+pitches.indexOf(p)*11)%16; // 55-70 range, varies by batter and pitch order
+      // First pitch: rotate through pitch types using batterIdx so each AB starts differently
+      let tunnelFactor;
+      if(!lastThrown){
+        const pitchIdx=pitches.indexOf(p);
+        // Cycle first-pitch recommendations by batter index
+        // Each batter gets a different "preferred" pitch slot
+        const preferredSlot=batterIdx%pitches.length;
+        const isPreferred=pitchIdx===preferredSlot;
+        const isSecondary=pitchIdx===(batterIdx+1)%pitches.length;
+        tunnelFactor=isPreferred?72:isSecondary?65:55;
+        // Extra boost for offspeed/breaking on first pitch to break fastball dominance
+        if(!isFB) tunnelFactor+=8;
+      } else {
+        tunnelFactor=tunnelScore(lastThrown,p.type,pitches.find(x=>x.type===lastThrown)?.velo||90,p.velo,pitcherHand);
+      }
       if(p.type===lastThrown) tunnelFactor-=15;
       tunnelFactor=Math.max(0,Math.min(100,tunnelFactor));
 
@@ -3018,19 +3038,40 @@ function AboutTab(){
 }
 
 async function loadCommunityStats(){
-  // Query pitch_log without username filter for community aggregate
-  const{data,error}=await sb.from("pitch_log").select("pitch_type,outcome_id,is_out,on_base,batter_name,pitcher_name,contact_class,hit_result,zone,balls,strikes").limit(10000);
-  if(error){console.error("loadCommunityStats:",error);return[];}
-  return data||[];
+  try{
+    const res=await sb.from("pitch_log").select("pitch_type,outcome_id,is_out,on_base,batter_name,pitcher_name,contact_class,hit_result,zone,balls,strikes").limit(10000);
+    console.log("loadCommunityStats response:",JSON.stringify({
+      dataLength:res.data?.length,
+      error:res.error,
+      status:res.status,
+      statusText:res.statusText,
+    }));
+    if(res.error) return{data:[],error:res.error.message||JSON.stringify(res.error)};
+    return{data:res.data||[],error:null};
+  }catch(e){
+    console.error("loadCommunityStats exception:",e);
+    return{data:[],error:e.message||String(e)};
+  }
 }
 
 async function loadAdminStats(){
-  // Total games and pitches across all users
-  const[games,pitches]=await Promise.all([
-    sb.from("games").select("id,username,total_pitches,my_score,opp_score,created_at"),
-    sb.from("pitch_log").select("id,pitch_type,outcome_id,is_out,on_base,batter_name,pitcher_name,contact_class,zone").limit(50000),
-  ]);
-  return{games:games.data||[],pitches:pitches.data||[]};
+  try{
+    const[games,pitches]=await Promise.all([
+      sb.from("games").select("id,username,total_pitches,my_score,opp_score,created_at"),
+      sb.from("pitch_log").select("id,pitch_type,outcome_id,is_out,on_base,batter_name,pitcher_name,contact_class,zone").limit(50000),
+    ]);
+    console.log("loadAdminStats games:",JSON.stringify({dataLength:games.data?.length,error:games.error}));
+    console.log("loadAdminStats pitches:",JSON.stringify({dataLength:pitches.data?.length,error:pitches.error}));
+    return{
+      games:games.data||[],
+      pitches:pitches.data||[],
+      gamesError:games.error?.message||null,
+      pitchesError:pitches.error?.message||null,
+    };
+  }catch(e){
+    console.error("loadAdminStats exception:",e);
+    return{games:[],pitches:[],gamesError:String(e),pitchesError:String(e)};
+  }
 }
 
 function CommunityTab({user}){
@@ -3038,13 +3079,22 @@ function CommunityTab({user}){
   const[log,setLog]=useState([]);
   const[adminData,setAdminData]=useState(null);
   const[loading,setLoading]=useState(true);
+  const[loadError,setLoadError]=useState(null);
   const[view,setView]=useState("pitches");
 
   useEffect(()=>{
     if(isAdmin){
-      loadAdminStats().then(d=>{setAdminData(d);setLoading(false);});
+      loadAdminStats().then(d=>{
+        setAdminData(d);
+        setLoading(false);
+        if(d.gamesError||d.pitchesError) setLoadError(`Games: ${d.gamesError||"ok"} | Pitches: ${d.pitchesError||"ok"}`);
+      });
     } else {
-      loadCommunityStats().then(d=>{setLog(d);setLoading(false);});
+      loadCommunityStats().then(r=>{
+        setLog(r.data||[]);
+        setLoading(false);
+        if(r.error) setLoadError(r.error);
+      });
     }
   },[]);
 
@@ -3092,6 +3142,15 @@ function CommunityTab({user}){
   },[log,adminData]);
 
   if(loading) return <div style={S.emptyState}>Loading community data...</div>;
+  if(loadError) return(
+    <div style={{padding:16}}>
+      <div style={{background:"#fff0f0",border:"1.5px solid #e74c3c",borderRadius:8,padding:12}}>
+        <div style={{fontSize:12,fontWeight:800,color:"#e74c3c",marginBottom:6}}>Failed to load community data</div>
+        <div style={{fontSize:11,color:"#c0392b",fontFamily:"monospace",wordBreak:"break-all"}}>{loadError}</div>
+        <div style={{fontSize:10,color:C.textSoft,marginTop:8}}>Check Supabase RLS policies and ensure the SELECT policy with USING (true) is applied to both pitch_log and games tables.</div>
+      </div>
+    </div>
+  );
 
   const totalPitches=isAdmin?(adminData?.pitches?.length||0):log.length;
   const totalGames=isAdmin?(adminData?.games?.length||0):0;
