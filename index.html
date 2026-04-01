@@ -1109,9 +1109,8 @@ function getZoneReason(pitchType, recZone){
   return "";
 }
 
-function getFullReason(lastPitch,lastZone,recPitch,recZone,score){
+function getFullReason(lastPitch,lastZone,recPitch,recZone,score,batterHand){
   const lp=PITCH_PROFILES[lastPitch],rp=PITCH_PROFILES[recPitch];
-  // Build zone location reasoning first
   const zoneReason=getZoneReason(recPitch,recZone);
   const zoneTxt=recZone?` — target ${zoneLabel(recZone,batterHand)}`:"";
 
@@ -2029,7 +2028,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
           </div>
           <div style={S.recReason}>
             {isChaseRec&&<span style={{color:C.blue,fontWeight:700}}>🎯 Chase pitch — </span>}
-            {getFullReason(lastThrown,lastZone,activePitch.type,recZone,activePitch.score)}
+            {getFullReason(lastThrown,lastZone,activePitch.type,recZone,activePitch.score,effectiveBatterHand)}
           </div>
         </div>
       )}
