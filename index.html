@@ -3313,6 +3313,7 @@ function CommunityTab({user}){
   const[loading,setLoading]=useState(true);
   const[loadError,setLoadError]=useState(null);
   const[view,setView]=useState("pitches");
+  const[drilldown,setDrilldown]=useState(null); // {type:"batter"|"pitcher", name, pitches:[]}
 
   useEffect(()=>{
     if(isAdmin){
@@ -3439,12 +3440,19 @@ function CommunityTab({user}){
         </>)}
 
         {view==="batters"&&(<>
-          <div style={S.sectionLabel}>Most Faced Batters</div>
+          <div style={S.sectionLabel}>Most Faced Batters — tap for breakdown</div>
           {batterAgg.map(b=>(
-            <div key={b.name} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:9,padding:"10px 14px",marginBottom:6}}>
+            <div key={b.name} onClick={()=>{
+              const src=isAdmin?(adminData?.pitches||[]):log;
+              const pitches=src.filter(p=>p.batter_name===b.name);
+              setDrilldown({type:"batter",name:b.name,pitches});
+            }} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:9,padding:"10px 14px",marginBottom:6,cursor:"pointer"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.text}}>{b.name}</div>
-                <div style={{fontSize:11,color:C.textSoft}}>{b.n} PA</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{fontSize:11,color:C.textSoft}}>{b.n} PA</div>
+                  <div style={{fontSize:11,color:C.textSoft}}>›</div>
+                </div>
               </div>
               <div style={{display:"flex",gap:16,marginTop:4}}>
                 {[["Out%",pct(b.outs,b.n)],["OBP",pct(b.hits,b.n)]].map(([lbl,val])=>(
@@ -3459,12 +3467,19 @@ function CommunityTab({user}){
         </>)}
 
         {view==="pitchers"&&(<>
-          <div style={S.sectionLabel}>Top Pitchers (by K%)</div>
+          <div style={S.sectionLabel}>Top Pitchers (by K%) — tap for breakdown</div>
           {pitcherAgg.map(p=>(
-            <div key={p.name} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:9,padding:"10px 14px",marginBottom:6}}>
+            <div key={p.name} onClick={()=>{
+              const src=isAdmin?(adminData?.pitches||[]):log;
+              const pitches=src.filter(x=>x.pitcher_name===p.name);
+              setDrilldown({type:"pitcher",name:p.name,pitches});
+            }} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:9,padding:"10px 14px",marginBottom:6,cursor:"pointer"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.text}}>{p.name}</div>
-                <div style={{fontSize:11,color:C.textSoft}}>{p.n} pitches</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{fontSize:11,color:C.textSoft}}>{p.n} pitches</div>
+                  <div style={{fontSize:11,color:C.textSoft}}>›</div>
+                </div>
               </div>
               <div style={{display:"flex",gap:16,marginTop:4}}>
                 {[["K%",pct(p.ks,p.n)],["Out%",pct(p.outs,p.n)]].map(([lbl,val])=>(
@@ -3492,6 +3507,157 @@ function CommunityTab({user}){
 
         {view==="opponents"&&<OpponentScout pct={pct}/>}
 
+      </div>
+      {drilldown&&<DrilldownModal data={drilldown} onClose={()=>setDrilldown(null)} pct={pct}/>}
+    </div>
+  );
+}
+
+function DrilldownModal({data,onClose,pct}){
+  const {type,name,pitches}=data;
+  const n=pitches.length;
+
+  // Pitch type breakdown
+  const byPitch=useMemo(()=>{
+    const map={};
+    pitches.forEach(p=>{
+      const k=p.pitch_type||"Unknown";
+      if(!map[k]) map[k]={type:k,n:0,outs:0,ks:0,hits:0,balls:0,fouls:0,hard:0,weak:0};
+      map[k].n++;
+      if(p.is_out) map[k].outs++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].ks++;
+      if(p.on_base) map[k].hits++;
+      if(p.outcome_id==="ball") map[k].balls++;
+      if(p.outcome_id==="foul") map[k].fouls++;
+      if(p.contact_class==="hard"||p.outcome_id==="hard") map[k].hard++;
+      if(p.contact_class==="weak"||p.outcome_id==="weak") map[k].weak++;
+    });
+    return Object.values(map).sort((a,b)=>b.n-a.n);
+  },[pitches]);
+
+  // Zone heatmap -- outcome score per cell
+  const zoneMap=useMemo(()=>{
+    const map={};
+    pitches.forEach(p=>{
+      if(!p.zone) return;
+      if(!map[p.zone]) map[p.zone]={n:0,outs:0,ks:0,hits:0,hard:0};
+      map[p.zone].n++;
+      if(p.is_out) map[p.zone].outs++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[p.zone].ks++;
+      if(p.on_base) map[p.zone].hits++;
+      if(p.contact_class==="hard"||p.outcome_id==="hard") map[p.zone].hard++;
+    });
+    return map;
+  },[pitches]);
+
+  // Outcome breakdown totals
+  const totals={
+    ks:pitches.filter(p=>p.outcome_id==="look"||p.outcome_id==="swing").length,
+    balls:pitches.filter(p=>p.outcome_id==="ball").length,
+    fouls:pitches.filter(p=>p.outcome_id==="foul").length,
+    hard:pitches.filter(p=>p.contact_class==="hard"||p.outcome_id==="hard").length,
+    weak:pitches.filter(p=>p.contact_class==="weak"||p.outcome_id==="weak").length,
+    outs:pitches.filter(p=>p.is_out).length,
+    hits:pitches.filter(p=>p.on_base).length,
+  };
+
+  // Zone cell color -- for batters: red=hard contact (avoid), blue=K/out (target)
+  // For pitchers: red=hard contact allowed, blue=K/outs (effective zones)
+  const cellColor=(z)=>{
+    if(!z||z.n===0) return{bg:"transparent",label:""};
+    const hardRate=z.hard/z.n;
+    const goodRate=(z.ks+z.outs)/z.n;
+    if(hardRate>0.4) return{bg:`rgba(180,30,30,${0.2+hardRate*0.6})`,label:`${Math.round(hardRate*100)}%HC`,labelColor:"#b41e1e"};
+    if(goodRate>0.4) return{bg:`rgba(26,111,181,${0.2+goodRate*0.6})`,label:`${Math.round(goodRate*100)}%K`,labelColor:"#1a6fb5"};
+    if(z.n>0) return{bg:`rgba(100,100,100,0.08)`,label:`${z.n}`,labelColor:C.textSoft};
+    return{bg:"transparent",label:""};
+  };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"16px",overflowY:"auto"}}>
+      <div style={{background:C.white,borderRadius:14,width:"100%",maxWidth:460,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 8px 32px rgba(0,0,0,0.3)"}}>
+        {/* Header */}
+        <div style={{position:"sticky",top:0,background:C.white,borderBottom:`1.5px solid ${C.border}`,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"14px 14px 0 0",zIndex:1}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:800,color:C.text}}>{name}</div>
+            <div style={{fontSize:10,color:C.textSoft,fontWeight:600,textTransform:"uppercase"}}>{type==="batter"?"Batter scouting report":"Pitcher scouting report"} · {n} pitches</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textSoft,lineHeight:1,fontFamily:"'Neuton','Nunito',serif"}}>✕</button>
+        </div>
+
+        <div style={{padding:"16px"}}>
+          {/* Outcome summary bar */}
+          <div style={{...S.sectionLabel,marginBottom:8}}>Outcome Summary</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
+            {[["K",totals.ks],["Out",totals.outs],["Hit",totals.hits],["Hard",totals.hard],["Weak",totals.weak],["Ball",totals.balls],["Foul",totals.fouls]].map(([lbl,val])=>(
+              <div key={lbl} style={{background:C.surface,borderRadius:8,padding:"8px 4px",textAlign:"center"}}>
+                <div style={{fontSize:16,fontWeight:800,color:lbl==="Hard"?C.warn:lbl==="K"||lbl==="Out"?C.green:C.text}}>{pct(val,n)}%</div>
+                <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl} ({val})</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Zone heatmap */}
+          <div style={{...S.sectionLabel,marginBottom:6}}>
+            {type==="batter"?"Zone Chart (where pitchers attack)":"Zone Chart (where they throw)"}
+          </div>
+          <div style={{fontSize:9,color:C.textSoft,marginBottom:8,fontWeight:500}}>
+            🔴 High hard contact rate · 🔵 High K/out rate · number = pitch count
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:3,marginBottom:16}}>
+            {Array.from({length:5},(_,r)=>Array.from({length:5},(_,c)=>{
+              const id=`${r}-${c}`;
+              const z=zoneMap[id];
+              const {bg,label,labelColor}=cellColor(z);
+              const inZone=r>=1&&r<=3&&c>=1&&c<=3;
+              return(
+                <div key={id} style={{
+                  borderRadius:5,minHeight:40,
+                  background:bg||(inZone?C.white:C.surface),
+                  border:`1px solid ${C.border}`,
+                  display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+                }}>
+                  {z&&z.n>0&&<div style={{fontSize:9,fontWeight:800,color:labelColor||C.textSoft,textAlign:"center",lineHeight:1.2}}>{label}</div>}
+                </div>
+              );
+            })).flat()}
+          </div>
+
+          {/* Pitch type breakdown */}
+          <div style={{...S.sectionLabel,marginBottom:8}}>
+            {type==="batter"?"Pitches Thrown Against":"Pitch Arsenal Effectiveness"}
+          </div>
+          {byPitch.map(p=>(
+            <div key={p.type} style={{background:C.surface,borderRadius:9,padding:"10px 12px",marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.text}}>{p.type}</div>
+                <div style={{fontSize:10,color:C.textSoft}}>{p.n} thrown</div>
+              </div>
+              {/* Outcome bar */}
+              <div style={{display:"flex",height:8,borderRadius:4,overflow:"hidden",marginBottom:6}}>
+                {[
+                  [pct(p.ks,p.n),C.blue],
+                  [pct(p.outs-p.ks,p.n),C.green],
+                  [pct(p.weak,p.n),"#95a5a6"],
+                  [pct(p.fouls,p.n),C.gold],
+                  [pct(p.balls,p.n),C.border],
+                  [pct(p.hard,p.n),C.warn],
+                  [pct(p.hits,p.n),"#e74c3c"],
+                ].filter(([w])=>w>0).map(([w,col],i)=>(
+                  <div key={i} style={{width:`${w}%`,background:col,minWidth:w>0?2:0}}/>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                {[["K%",pct(p.ks,p.n),C.blue],["Out%",pct(p.outs,p.n),C.green],["Hard%",pct(p.hard,p.n),C.warn],["OBP",pct(p.hits,p.n),"#e74c3c"]].map(([lbl,val,col])=>(
+                  <div key={lbl} style={{textAlign:"center"}}>
+                    <div style={{fontSize:12,fontWeight:800,color:col}}>{val}%</div>
+                    <div style={{fontSize:8,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
