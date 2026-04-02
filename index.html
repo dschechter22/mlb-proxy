@@ -46,6 +46,9 @@ async function saveGame(session,user){
       pitcher_ovr:session.pitcherOvr||0,my_score:session.myScore||0,opp_score:session.oppScore||0,
       innings:session.inning||1,total_pitches:session.gameLog?.length||0,
       game_log:session.gameLog||[],username:user?.username||"anon",pin_hash:user?.pinHash||"",
+      difficulty:session.difficulty||null,
+      opponent_username:session.opponentUsername||null,
+      opponent_pitcher:session.opponentPitcher||null,
     }).select().single();
     if(ge){console.error("Save game error:",ge);return null;}
     if(session.gameLog?.length>0){
@@ -448,6 +451,22 @@ const COUNT_LEVERAGE = {
 // For breaking balls: primary direction is arm-side away from batter.
 // RHP vs RHH: slider breaks away (col 0-1), RHP vs LHH: slider breaks inside (col 3-4)
 // LHP vs LHH: slider breaks away (col 0-1), LHP vs RHH: slider breaks inside (col 3-4)
+// Softmax sampling -- converts scores to probabilities and samples
+// temperature: 0.3=very deterministic, 1.0=balanced, 2.0=very random
+function softmaxSample(scores, temperature){
+  const t=Math.max(0.15, temperature);
+  const exps=scores.map(s=>Math.exp(s/t));
+  const sum=exps.reduce((a,b)=>a+b,0);
+  const probs=exps.map(e=>e/sum);
+  const r=Math.random();
+  let cum=0;
+  for(let i=0;i<probs.length;i++){
+    cum+=probs[i];
+    if(r<=cum) return i;
+  }
+  return probs.length-1;
+}
+
 function getRecZone(pitchType, pitcherHand, batterHand){
   const sameHand = pitcherHand === batterHand;
   // Catcher's view: RHB on LEFT. Col 0=inside-to-RHH, col 4=away-from-RHH
@@ -815,7 +834,21 @@ function LineupSetup({onSave,initialLineup}){
                   </div>
                 </div>
               ))}
-              {!apiLoading&&results.length===0&&<div style={{padding:"8px 10px",fontSize:11,color:C.textSoft}}>No results</div>}
+              {!apiLoading&&results.length===0&&(
+                <div style={{padding:"10px"}}>
+                  <div style={{fontSize:11,color:C.textSoft,marginBottom:6}}>No DD card found.</div>
+                  <div style={{fontSize:10,color:C.textSoft,lineHeight:1.5,marginBottom:8}}>
+                    Collection reward cards (e.g. Jolt, collection PCA, Finest) are not listed on the market and won't appear in search. Try a different card for the same player, or add them manually below.
+                  </div>
+                  <button onClick={()=>{
+                    // Add manually with just the name typed
+                    const manualBatter={name:query,bat:"R",ovr:0,rarity:"Manual",uuid:"",fromApi:false};
+                    selectBatter(i,manualBatter);
+                  }} style={{...S.ghostBtn,fontSize:10,padding:"5px 10px",width:"100%"}}>
+                    + Add "{query}" manually (handedness: R -- tap slot to change)
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -887,6 +920,9 @@ function SetupTab({onComplete,onViewStats}){
   const [apiError,setApiError]=useState("");
   const [selectedCard,setSelectedCard]=useState(null);
   const [autoGenning,setAutoGenning]=useState(false);
+  const [difficulty,setDifficulty]=useState("All-Star");
+  const [opponentUsername,setOpponentUsername]=useState("");
+  const [opponentPitcher,setOpponentPitcher]=useState("");
   const proxyReady = true;
 
   // All hooks must run before any early return
@@ -958,7 +994,8 @@ function SetupTab({onComplete,onViewStats}){
       canStart&&onComplete({pitcherHand,batterHand:effectiveBatterHand,pitches,lineup,batterIdx,setBatterIdx,
         pitcherName:selectedName||"Custom",pitcherOvr:selectedCard?.ovr||0,
         pitcherControl:selectedCard?.control||null,pitcherMovement:selectedCard?.movement||null,
-        gameType:gameType.id,totalInnings:gameType.id==="event"?6:gameType.id==="br"?3:9});
+        gameType:gameType.id,totalInnings:gameType.id==="event"?6:gameType.id==="br"?3:9,
+        difficulty,opponentUsername:opponentUsername.trim()||null,opponentPitcher:opponentPitcher.trim()||null});
     }}
       style={{...S.primaryBtn,opacity:canStart?1:0.4,margin:"12px 16px 0"}} disabled={!canStart}>
       Start Game
@@ -980,6 +1017,33 @@ function SetupTab({onComplete,onViewStats}){
 
       {view==="pitcher"&&(
         <div style={{padding:"16px"}}>
+          {/* Difficulty selector */}
+          <div style={{marginBottom:16}}>
+            <div style={S.sectionLabel}>Game Difficulty</div>
+            <div style={{display:"flex",gap:6,marginTop:6}}>
+              {["All-Star","HOF","Legend"].map(d=>(
+                <button key={d} onClick={()=>setDifficulty(d)} style={{
+                  flex:1,padding:"8px 4px",borderRadius:8,fontSize:11,fontWeight:700,
+                  fontFamily:"'Neuton','Nunito',serif",cursor:"pointer",
+                  background:difficulty===d?C.greenDim:C.surface,
+                  border:`1.5px solid ${difficulty===d?C.greenMid:C.border}`,
+                  color:difficulty===d?C.green:C.textMid,
+                }}>{d}</button>
+              ))}
+            </div>
+          </div>
+          {/* Opponent info */}
+          <div style={{marginBottom:16}}>
+            <div style={S.sectionLabel}>Opponent Info <span style={{fontSize:9,fontWeight:500,color:C.textSoft}}>(optional)</span></div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:6}}>
+              <input value={opponentUsername} onChange={e=>setOpponentUsername(e.target.value)}
+                placeholder="Opponent username (e.g. xXSlider99Xx)"
+                style={{...S.input,width:"100%",boxSizing:"border-box"}}/>
+              <input value={opponentPitcher} onChange={e=>setOpponentPitcher(e.target.value)}
+                placeholder="Opponent pitcher name (e.g. Gerrit Cole)"
+                style={{...S.input,width:"100%",boxSizing:"border-box"}}/>
+            </div>
+          </div>
           <div style={{marginBottom:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={S.label}>Pitcher Search</div>
@@ -1147,7 +1211,7 @@ function getFullReason(lastPitch,lastZone,recPitch,recZone,score,batterHand){
 }
 
 // ─── At-Bat Tab ───────────────────────────────────────────────────────────────
-function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,onEndGame,onUndo,onSetBalls,onSetStrikes,onAddRun,onPitcherSwap}){
+function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,onEndGame,onUndo,onSetBalls,onSetStrikes,onAddRun,onPitcherSwap,temperature}){
   const{pitcherHand,pitches,sequence,outcomes,gameLog,lineup,batterIdx,outs,inning,bases}=session;
   const balls=session.balls||0;
   const strikes=session.strikes||0;
@@ -1166,6 +1230,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
   const[contactClass,setContactClass]=useState(null);
   const[hitResult,setHitResult]=useState(null);
   const[errorBasePending,setErrorBasePending]=useState(false);
+  const[swingTiming,setSwingTiming]=useState(null); // Early/Good/Late/null
   const[showOutConfirm,setShowOutConfirm]=useState(false);
   const[outConfirmType,setOutConfirmType]=useState("out");
   const[runnerScoringIdx,setRunnerScoringIdx]=useState(0);
@@ -1302,7 +1367,25 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       }
       countFactor=Math.max(0,Math.min(100,countFactor));
 
-      // Factor 3: FB:Offspeed ratio + alternating bonus
+      // Swing timing factor -- based on hitter's last swing
+      // Early = hitter out in front, throw slower/offspeed again
+      // Late = hitter behind, go heat/fastball
+      // Good = hitter on time, change eye level or location
+      let timingFactor=0;
+      if(swingTiming==="Early"){
+        // Hitter is early -- off-speed/breaking effective
+        if(!isFB) timingFactor=20;
+        if(isFB) timingFactor=-10;
+      } else if(swingTiming==="Late"){
+        // Hitter is late -- fastball up, they can't catch up
+        if(isFB) timingFactor=20;
+        if(!isFB) timingFactor=-5;
+      } else if(swingTiming==="Good"){
+        // Hitter is on time -- change eye level or location
+        // Penalize same pitch type slightly, boost contrasting
+        if(lastThrown&&PITCH_PROFILES[lastThrown]?.type===PITCH_PROFILES[p.type]?.type) timingFactor=-10;
+        else timingFactor=10;
+      }
       let ratioFactor=50;
       if(isFB){
         ratioFactor=recentFbPct>targetFbPct
@@ -1346,23 +1429,34 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       if(sameZone3)      patternPenalty+=25;
       if(samePitchZone2) patternPenalty+=20;
 
-      // Equal-weight composite score
+      // Equal-weight composite score (timing factor added as flat bonus/penalty)
       const composite=(tunnelFactor+countFactor+ratioFactor+zoneFactor+outcomeFactor)/5;
-      const finalScore=Math.round(Math.min(100,Math.max(0,composite+zoneBonus*0.3+stealBonus-patternPenalty)));
+      const finalScore=Math.round(Math.min(100,Math.max(0,composite+zoneBonus*0.3+stealBonus+timingFactor-patternPenalty)));
 
       return{...p,score:finalScore,chaseWeight:effectiveChaseWeight,stealThreat};
     })
     .sort((a,b)=>b.score-a.score);
-  },[pitches,countKey,lastThrown,lastZone,outcomes,pitcherHand,pitchZoneHistory,gameLog,effectiveBatterHand,sequence,session,balls,strikes]);
+  },[pitches,countKey,lastThrown,lastZone,outcomes,pitcherHand,pitchZoneHistory,gameLog,effectiveBatterHand,sequence,session,balls,strikes,swingTiming]);
 
-  // Active rec drives both the box and the blue baseball
-  const activePitch=scored.find(p=>selectedPitch&&p.type===selectedPitch)||scored[0];
-  // Always sync selectedPitch to top recommendation when current selection isn't valid
+  // Softmax-sample the top recommendation from scored pitches
+  // This runs once per at-bat start (when selectedPitch is null/invalid)
+  // Temperature controls variety: low=always top scorer, high=more variety
+  const sampledTopType=useMemo(()=>{
+    if(!scored.length) return null;
+    const t=temperature||0.75;
+    const idx=softmaxSample(scored.map(p=>p.score),t);
+    return scored[idx]?.type||scored[0].type;
+  },[scored,temperature]);
+
+  // Active rec: if user has manually selected a pitch, use that; otherwise use sampled top
+  const activePitch=scored.find(p=>selectedPitch&&p.type===selectedPitch)||scored.find(p=>p.type===sampledTopType)||scored[0];
+
+  // Sync selectedPitch when current selection isn't valid
   useEffect(()=>{
     if(scored.length>0&&(!selectedPitch||!scored.find(p=>p.type===selectedPitch))){
-      setSelectedPitch(scored[0].type);
+      setSelectedPitch(sampledTopType||scored[0].type);
     }
-  },[scored]);
+  },[scored,sampledTopType]);
   const chaseW=activePitch?.chaseWeight||0;
   // Deterministic chase decision per at-bat state (use sequence length as seed to avoid re-render flicker)
   const useChase=chaseW>0&&((sequence.length*17+strikes*7)%100)<(chaseW*100);
@@ -1388,6 +1482,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
 
   const advanceNext=()=>{
     setBalls(0);setStrikes(0);setSelectedZone(null);setSelectedPitch(null);
+    setSwingTiming(null);
     resetContactFlow();setShowOutConfirm(false);
     onNewAtBat();
   };
@@ -1476,6 +1571,8 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
         isPositive:true,isOut:ns>=3,onBase:false,batter:currentBatter?.name||"",balls,strikes:ns-1,inning});
       setSelectedZone(null);setSelectedPitch(null);
       if(ns>=3){onAddOut();setOutConfirmType("k");triggerOutAdvancement();}
+      // Swing timing prompt only for strike swinging (not called strike)
+      else if(oc.id==="swing") setSwingTiming("pending");
       return;
     }
     if(oc.id==="foul"){
@@ -1483,6 +1580,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       onLogPitch({pitch:selectedPitch,zone:selectedZone,outcome:"Foul",outcomeId:"foul",
         isPositive:false,isOut:false,onBase:false,batter:currentBatter?.name||"",balls,strikes,inning});
       setSelectedZone(null);setSelectedPitch(null);
+      setSwingTiming("pending");
       return;
     }
     if(oc.id==="hbp"){
@@ -1494,7 +1592,7 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
       setOutConfirmType("hbp");setShowOutConfirm(true);
       return;
     }
-    if(oc.id==="hard"||oc.id==="weak"){setContactPending(oc);return;}
+    if(oc.id==="hard"||oc.id==="weak"){setContactPending(oc);setSwingTiming("pending");return;}
   };
 
   const handleHitResult=(result)=>{
@@ -1734,7 +1832,20 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
             style={{...S.input,width:"100%",boxSizing:"border-box",marginBottom:6}}/>
           {subApiLoading&&<div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>Searching DD cards...</div>}
           {!subApiLoading&&subQuery.length>=2&&subApiResults.length===0&&(
-            <div style={{fontSize:11,color:C.textSoft,padding:"4px 0"}}>No results found</div>
+            <div style={{marginBottom:6}}>
+              <div style={{fontSize:11,color:C.textSoft,marginBottom:4}}>No DD card found.</div>
+              <div style={{fontSize:10,color:C.textSoft,lineHeight:1.5,marginBottom:6}}>
+                Collection reward cards won't appear in search. Try a different card for the same player, or add manually.
+              </div>
+              {subSlot!==null&&(
+                <button onClick={()=>{
+                  const manual={name:subQuery,bat:"R",ovr:0,rarity:"Manual",uuid:"",fromApi:false};
+                  onSub(subSlot,manual);setShowSub(false);setSubQuery("");setSubSlot(null);setSubApiResults([]);
+                }} style={{...S.ghostBtn,fontSize:10,padding:"5px 10px",width:"100%"}}>
+                  + Add "{subQuery}" manually
+                </button>
+              )}
+            </div>
           )}
           {subApiResults.length>0&&subSlot===null&&(
             <div style={{fontSize:10,color:C.warn,marginBottom:6,fontWeight:600}}>Select a lineup slot below to sub this player in</div>
@@ -1984,6 +2095,30 @@ function AtBatTab({session,onLogPitch,onNewAtBat,onSub,onAddOut,onUpdateBases,on
                 color:id==="scored"?C.green:C.text,
               }}>{lbl}</button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Swing timing prompt -- appears after swings, fouls, contact */}
+      {swingTiming==="pending"&&(
+        <div style={{background:C.white,border:`2px solid ${C.blue}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>How was the swing timing?</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {[["Early","🟡 Early","Hitter out in front"],["Good","🟢 On Time","Hitter on the barrel"],["Late","🔴 Late","Hitter behind it"]].map(([val,lbl,sub])=>(
+              <button key={val} onClick={()=>setSwingTiming(val)} style={{
+                flex:1,padding:"10px 8px",borderRadius:8,fontFamily:"'Neuton','Nunito',serif",
+                border:`1.5px solid ${C.border}`,background:C.surface,
+                cursor:"pointer",textAlign:"center",minWidth:80,
+              }}>
+                <div style={{fontSize:12,fontWeight:800,color:C.text}}>{lbl}</div>
+                <div style={{fontSize:9,color:C.textSoft,marginTop:2}}>{sub}</div>
+              </button>
+            ))}
+            <button onClick={()=>setSwingTiming(null)} style={{
+              padding:"10px 8px",borderRadius:8,fontFamily:"'Neuton','Nunito',serif",
+              border:`1.5px solid ${C.border}`,background:"none",
+              cursor:"pointer",fontSize:10,color:C.textSoft,minWidth:60,
+            }}>Skip</button>
           </div>
         </div>
       )}
@@ -3162,7 +3297,7 @@ function CommunityTab({user}){
   const totalGames=isAdmin?(adminData?.games?.length||0):0;
   const totalUsers=isAdmin?new Set(adminData?.games?.map(g=>g.username)||[]).size:0;
 
-  const VIEWS=[{id:"pitches",label:"Pitches"},{id:"batters",label:"Batters"},{id:"pitchers",label:"Pitchers"}];
+  const VIEWS=[{id:"pitches",label:"Pitches"},{id:"batters",label:"Batters"},{id:"pitchers",label:"Pitchers"},{id:"opponents",label:"Opponents"}];
 
   return(
     <div style={{padding:"0"}}>
@@ -3264,18 +3399,144 @@ function CommunityTab({user}){
           </>)}
         </>)}
 
+        {view==="opponents"&&<OpponentScout pct={pct}/>}
+
       </div>
     </div>
   );
 }
 
+function OpponentScout({pct}){
+  const[oppQuery,setOppQuery]=useState("");
+  const[pitcherQuery,setPitcherQuery]=useState("");
+  const[results,setResults]=useState(null);
+  const[searching,setSearching]=useState(false);
+  const[error,setError]=useState(null);
 
-function SettingsTab({paletteKey,onPaletteChange}){
+  const search=async()=>{
+    if(!oppQuery.trim()&&!pitcherQuery.trim()) return;
+    setSearching(true);setError(null);setResults(null);
+    try{
+      // Find game IDs matching the opponent criteria
+      let gamesQuery=sb.from("games").select("id,opponent_username,opponent_pitcher,username");
+      if(oppQuery.trim()) gamesQuery=gamesQuery.ilike("opponent_username",`%${oppQuery.trim()}%`);
+      if(pitcherQuery.trim()) gamesQuery=gamesQuery.ilike("opponent_pitcher",`%${pitcherQuery.trim()}%`);
+      const{data:games,error:ge}=await gamesQuery.limit(200);
+      if(ge){setError(ge.message);setSearching(false);return;}
+      if(!games||games.length===0){setResults({games:[],pitches:[]});setSearching(false);return;}
+      const gameIds=games.map(g=>g.id);
+      // Fetch all pitch_log rows for those games
+      const{data:pitches,error:pe}=await sb.from("pitch_log")
+        .select("pitch_type,outcome_id,is_out,on_base,contact_class,zone,balls,strikes,batter_name")
+        .in("game_id",gameIds)
+        .limit(10000);
+      if(pe){setError(pe.message);setSearching(false);return;}
+      setResults({games,pitches:pitches||[]});
+    }catch(e){setError(String(e));}
+    setSearching(false);
+  };
+
+  // Aggregate pitch tendencies
+  const pitchAgg=useMemo(()=>{
+    if(!results?.pitches?.length) return[];
+    const map={};
+    results.pitches.forEach(p=>{
+      const k=p.pitch_type||"Unknown";
+      if(!map[k]) map[k]={type:k,n:0,outs:0,ks:0,hits:0};
+      map[k].n++;
+      if(p.is_out) map[k].outs++;
+      if(p.outcome_id==="look"||p.outcome_id==="swing") map[k].ks++;
+      if(p.on_base) map[k].hits++;
+    });
+    return Object.values(map).sort((a,b)=>b.n-a.n);
+  },[results]);
+
+  const reportedGames=results?.games||[];
+  const uniqueUsers=[...new Set(reportedGames.map(g=>g.username))];
+
+  return(
+    <div>
+      <div style={{fontSize:11,color:C.textSoft,marginBottom:12,fontWeight:500,lineHeight:1.5}}>
+        Search by your opponent's username or the pitcher they used. Results are pooled from all Maddux.io users who've faced the same opponent.
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+        <input value={oppQuery} onChange={e=>setOppQuery(e.target.value)}
+          placeholder="Opponent username (partial ok)"
+          style={{...S.input,width:"100%",boxSizing:"border-box"}}/>
+        <input value={pitcherQuery} onChange={e=>setPitcherQuery(e.target.value)}
+          placeholder="Pitcher they used (partial ok)"
+          style={{...S.input,width:"100%",boxSizing:"border-box"}}/>
+        <button onClick={search} disabled={searching||(!oppQuery.trim()&&!pitcherQuery.trim())} style={{...S.primaryBtn,opacity:searching?0.6:1}}>
+          {searching?"Searching...":"Search Opponent"}
+        </button>
+      </div>
+      {error&&<div style={{fontSize:11,color:C.warn,marginBottom:8}}>{error}</div>}
+      {results&&results.pitches.length===0&&(
+        <div style={{fontSize:12,color:C.textSoft,padding:"12px 0",fontWeight:500}}>
+          No games found matching that opponent. Data builds up as more users log games against the same opponents.
+        </div>
+      )}
+      {results&&results.pitches.length>0&&(<>
+        <div style={{fontSize:11,color:C.textSoft,marginBottom:10,fontWeight:500}}>
+          {results.pitches.length} pitches across {reportedGames.length} games · reported by {uniqueUsers.length} user{uniqueUsers.length!==1?"s":""} · data is anonymous
+        </div>
+        <div style={S.sectionLabel}>What works against this opponent</div>
+        {pitchAgg.map(p=>(
+          <div key={p.type} style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:9,padding:"10px 14px",marginBottom:6}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+              <div style={{fontSize:13,fontWeight:800,color:C.text}}>{p.type}</div>
+              <div style={{fontSize:11,color:C.textSoft}}>{p.n} thrown</div>
+            </div>
+            <div style={{display:"flex",gap:16}}>
+              {[["K%",pct(p.ks,p.n)],["Out%",pct(p.outs,p.n)],["OBP",pct(p.hits,p.n)]].map(([lbl,val])=>(
+                <div key={lbl} style={{textAlign:"center"}}>
+                  <div style={{fontSize:14,fontWeight:800,color:lbl==="OBP"?C.warn:C.green}}>{val}%</div>
+                  <div style={{fontSize:9,color:C.textSoft,fontWeight:700}}>{lbl}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </>)}
+    </div>
+  );
+}
+
+
+function SettingsTab({paletteKey,onPaletteChange,temperature,onTempChange}){
+  const tempLabels=[
+    [0.3,"Very Predictable","Always recommends the highest-scored pitch"],
+    [0.75,"Balanced","Occasionally surfaces #2 or #3 pitch"],
+    [1.25,"Varied","Frequently mixes in lower-ranked pitches"],
+    [2.0,"Wild","Anything goes -- keeps opponents totally guessing"],
+  ];
+  const closestLabel=tempLabels.reduce((a,b)=>Math.abs(b[0]-temperature)<Math.abs(a[0]-temperature)?b:a);
   return(
     <div style={{padding:"16px"}}>
       <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>Settings</div>
-      <div style={{fontSize:11,color:C.textSoft,marginBottom:16,fontWeight:500}}>Choose a color theme for the app.</div>
+
+      <div style={{marginBottom:24}}>
+        <div style={S.sectionLabel}>Recommendation Variety</div>
+        <div style={{fontSize:11,color:C.textSoft,marginBottom:10,fontWeight:500}}>
+          Controls how often the app suggests a lower-ranked pitch instead of always picking the top scorer. Low temperature = always the best option. High temperature = more unpredictable.
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {tempLabels.map(([val,lbl,desc])=>(
+            <button key={val} onClick={()=>onTempChange(val)} style={{
+              padding:"10px 14px",borderRadius:9,fontFamily:"'Neuton','Nunito',serif",
+              border:`1.5px solid ${temperature===val?C.greenMid:C.border}`,
+              background:temperature===val?C.greenDim:C.white,
+              cursor:"pointer",textAlign:"left",
+            }}>
+              <div style={{fontSize:12,fontWeight:800,color:temperature===val?C.green:C.text}}>{lbl}</div>
+              <div style={{fontSize:10,color:C.textSoft,marginTop:2}}>{desc}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div style={S.sectionLabel}>Color Theme</div>
+      <div style={{fontSize:11,color:C.textSoft,marginBottom:10,fontWeight:500}}>Choose a color theme for the app.</div>
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         {Object.entries(PALETTES).map(([key,pal])=>{
           const active=paletteKey===key;
@@ -3395,7 +3656,9 @@ function App(){
   const [showInstructions,setShowInstructions]=useState(false);
   const [session,setSession]=useState(null);
   const [paletteKey,setPaletteKey]=useState(()=>localStorage.getItem('maddux_palette')||'green');
+  const [temperature,setTemperature]=useState(()=>parseFloat(localStorage.getItem('maddux_temp')||'0.75'));
   const handlePaletteChange=(key)=>{setPalette(key);setPaletteKey(key);};
+  const handleTempChange=(val)=>{setTemperature(val);localStorage.setItem('maddux_temp',String(val));};
   const [showScorePrompt,setShowScorePrompt]=useState(false);
   const [scoreInput,setScoreInput]=useState({my:0,opp:0});
   const [showGameOver,setShowGameOver]=useState(false);
@@ -3599,7 +3862,7 @@ function App(){
       <div style={S.content}>
         {tab==="setup"&&<SetupTab onComplete={handleSetup} onViewStats={()=>setTab("stats")}/>}
         {tab==="atbat"&&(session
-          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame} onUndo={handleUndo} onSetBalls={handleSetBalls} onSetStrikes={handleSetStrikes} onAddRun={handleAddRun} onPitcherSwap={handlePitcherSwap}/>
+          ?<AtBatTab session={session} onLogPitch={handleLogPitch} onNewAtBat={handleNewAtBat} onSub={handleSub} onAddOut={handleAddOut} onUpdateBases={handleUpdateBases} onEndGame={handleEndGame} onUndo={handleUndo} onSetBalls={handleSetBalls} onSetStrikes={handleSetStrikes} onAddRun={handleAddRun} onPitcherSwap={handlePitcherSwap} temperature={temperature}/>
           :<div style={S.emptyState}>Complete setup first.</div>
         )}
         {tab==="lineup"&&(session?<LineupTab session={session}/>:<div style={S.emptyState}>Complete setup first.</div>)}
@@ -3619,7 +3882,7 @@ function App(){
         {tab==="history"&&<HistoryTab user={user}/>}
         {tab==="community"&&<CommunityTab user={user}/>}
         {tab==="about"&&<AboutTab/>}
-        {tab==="settings"&&<SettingsTab paletteKey={paletteKey} onPaletteChange={handlePaletteChange}/>}
+        {tab==="settings"&&<SettingsTab paletteKey={paletteKey} onPaletteChange={handlePaletteChange} temperature={temperature} onTempChange={handleTempChange}/>}
       </div>
       {showInstructions&&<InstructionsModal onClose={()=>setShowInstructions(false)}/>}
     </div>
