@@ -868,7 +868,90 @@ function LineupSetup({onSave,initialLineup}){
 // ─── Setup Tab ────────────────────────────────────────────────────────────────
 const PITCH_TYPES_LIST=PITCH_TYPES;
 
+const PATCH_NOTES=[
+  {
+    version:"v1.1 — First Patch",
+    date:"April 2025",
+    sections:[
+      {
+        title:"Bug Fixes",
+        items:[
+          "Shohei Ohtani and two-way players now appear in lineup search.",
+          "Diamond cards now show before silver cards in all search results.",
+          "Collection reward cards (Jolt, Finest, collection PCA, Tatis collection) cannot be pulled from the DD API as they are not listed on the market. If a player doesn't show up, try a different card version or add them manually -- they will still track.",
+          "Batter handedness now fetches the full DD card on selection for more accurate L/R/S tracking.",
+          "First pitch recommendations now rotate through pitch types across at-bats instead of always defaulting to a high fastball.",
+          "Middle-middle zone is now heavily suppressed across all pitch types.",
+          "Breaking balls now correctly recommend the away corner based on handedness matchup from the catcher's view.",
+          "Zone labels now orient correctly from the catcher's perspective.",
+          "Sinker movement profile corrected, was incorrectly showing rise.",
+        ],
+      },
+      {
+        title:"New Features",
+        items:[
+          "Game difficulty selector (All-Star, HOF, Legend) now saves with each game for future stats filtering.",
+          "Opponent tracking: enter your opponent's username and pitcher before each game. Powers a community scouting report in the Global tab.",
+          "Opponent scouting report in the Global tab: search any opponent username or pitcher and see aggregate pitch tendencies from all Maddux.io users who've faced them.",
+          "Swing timing input: after swings, fouls, and contact you can log Early, On Time, or Late. Directly adjusts the next recommendation.",
+          "Recommendation variety setting in Settings: Very Predictable, Balanced, Varied, or Wild. Uses softmax sampling so the model occasionally surfaces lower-ranked pitches to stay unpredictable.",
+          "Tunneling explainer added to the instructions.",
+          "About page added with background on why this was built, data privacy statement, and beta bug report info.",
+          "Community/Global tab now live with aggregate pitch stats across all users.",
+        ],
+      },
+      {
+        title:"Coming Soon",
+        items:[
+          "Stats filtering by game difficulty.",
+          "Hitting counterpart: predict what pitch is coming based on opponent tendencies.",
+        ],
+      },
+    ],
+  },
+];
+
+function PatchNotesModal({onClose}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"16px",overflowY:"auto"}}>
+      <div style={{background:C.white,borderRadius:14,width:"100%",maxWidth:460,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 32px rgba(0,0,0,0.25)"}}>
+        <div style={{position:"sticky",top:0,background:C.white,borderBottom:`1.5px solid ${C.border}`,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"14px 14px 0 0"}}>
+          <div style={{fontSize:16,fontWeight:800,color:C.text}}>Patch Notes</div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textSoft,fontFamily:"'Neuton','Nunito',serif",lineHeight:1}}>✕</button>
+        </div>
+        <div style={{padding:"16px"}}>
+          {PATCH_NOTES.map((patch,i)=>(
+            <div key={i} style={{marginBottom:24}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.green}}>{patch.version}</div>
+                <div style={{fontSize:11,color:C.textSoft,fontWeight:500}}>{patch.date}</div>
+              </div>
+              {patch.sections.map((s,j)=>(
+                <div key={j} style={{marginBottom:14}}>
+                  <div style={{
+                    fontSize:10,fontWeight:800,color:C.white,background:s.title==="Coming Soon"?C.gold:s.title==="Bug Fixes"?C.textMid:C.green,
+                    borderRadius:4,padding:"2px 8px",display:"inline-block",marginBottom:8,textTransform:"uppercase",letterSpacing:"0.07em",
+                  }}>{s.title}</div>
+                  <ul style={{margin:"0 0 0 16px",padding:0}}>
+                    {s.items.map((item,k)=>(
+                      <li key={k} style={{fontSize:12,color:C.textMid,lineHeight:1.65,fontWeight:500,marginBottom:3}}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div style={{fontSize:10,color:C.textSoft,textAlign:"center",marginTop:8}}>
+            Found a bug? Email madduxiobaseball@gmail.com
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GameTypeScreen({onSelect}) {
+  const [showPatch,setShowPatch]=useState(false);
   const TYPES = [
     {id:"ranked", label:"Ranked", sub:"9 innings", color:"#c0392b", hover:"#e74c3c"},
     {id:"br", label:"Battle Royale", sub:"3 innings", color:"#1a5fa8", hover:"#2980b9"},
@@ -901,7 +984,13 @@ function GameTypeScreen({onSelect}) {
             </button>
           ))}
         </div>
+        <button onClick={()=>setShowPatch(true)} style={{
+          marginTop:20,width:"100%",padding:"12px",background:"none",
+          border:`1.5px solid ${C.border}`,borderRadius:10,cursor:"pointer",
+          fontFamily:"'Neuton','Nunito',serif",fontSize:12,fontWeight:700,color:C.textMid,
+        }}>📋 What's New — v1.1 First Patch</button>
       </div>
+      {showPatch&&<PatchNotesModal onClose={()=>setShowPatch(false)}/>}
     </div>
   );
 }
@@ -3095,6 +3184,7 @@ const INSTRUCTIONS = [
     title:"Getting Started",
     body:null,
     steps:["Select a game mode (Ranked, Battle Royale, or Event)","Search your pitcher by name in the DD card search","Build the opposing lineup or use Auto-Fill","Tap Start Game"],
+    note:"Note: collection reward cards (Jolt, Finest, collection PCA) are not listed on the market and cannot be pulled from the DD API. If a player does not appear, try searching a different card version for them, or add them manually using the option that appears in the search results.",
   },
   {
     title:"During the Game",
@@ -3138,6 +3228,7 @@ function InstructionsModal({onClose}){
               {s.body&&<div style={{fontSize:12,color:C.textMid,lineHeight:1.6,fontWeight:500}}>{s.body}</div>}
               {s.steps&&<ol style={{margin:"0 0 0 18px",padding:0}}>{s.steps.map((st,j)=><li key={j} style={{fontSize:12,color:C.textMid,lineHeight:1.7,fontWeight:500}}>{st}</li>)}</ol>}
               {s.bullets&&<ul style={{margin:"0 0 0 14px",padding:0}}>{s.bullets.map((b,j)=><li key={j} style={{fontSize:12,color:C.textMid,lineHeight:1.65,fontWeight:500,marginBottom:2}}>{b}</li>)}</ul>}
+              {s.note&&<div style={{fontSize:11,color:C.gold,background:C.goldLight,borderRadius:6,padding:"8px 10px",marginTop:8,fontWeight:500,lineHeight:1.5}}>{s.note}</div>}
             </div>
           ))}
         </div>
